@@ -115,6 +115,8 @@ Build one feature per session. Each has a goal, a build list, and a check that d
 
 **Build:** Connection state indicator. Automatic reconnect with backoff. Request a fresh snapshot on reconnect.
 
+*Decided (F11):* the snapshot-on-connect protocol already gives resync; added an app-level heartbeat (15 s) with a 35 s stale watchdog, jittered backoff that never gives up, and a dimmed "last known totals" state. Verified with gateway stop, kill and pause.
+
 **Done when:** Killing the gateway shows a disconnected state, and restarting it reconnects and resyncs without a page refresh.
 
 ---

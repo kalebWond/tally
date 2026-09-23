@@ -1,7 +1,9 @@
 import { createServer } from 'node:http';
 import {
+  HEARTBEAT_MS,
   type HealthResponse,
   LiveCloseCodes,
+  type LiveHeartbeat,
   type LiveSnapshot,
   type LiveUpdate,
   redisKeys,
@@ -18,8 +20,10 @@ interface GatewayOptions {
   /** How often each watched contest's totals are read from Redis. */
   pollMs: number;
   log: Logger;
-  /** Dead-connection sweep interval. */
+  /** Dead-connection sweep interval (WebSocket ping/pong). */
   heartbeatMs?: number;
+  /** App-level heartbeat frame interval, so browsers can detect a silently dead connection. */
+  heartbeatFrameMs?: number;
 }
 
 /** One per contest with at least one viewer: a single Redis poll fanned out to every client. */
@@ -37,7 +41,13 @@ interface Room {
 
 const ContestId = z.uuid();
 
-export function createGateway({ redis, pollMs, log, heartbeatMs = 30_000 }: GatewayOptions) {
+export function createGateway({
+  redis,
+  pollMs,
+  log,
+  heartbeatMs = 30_000,
+  heartbeatFrameMs = HEARTBEAT_MS,
+}: GatewayOptions) {
   const rooms = new Map<string, Room>();
   const alive = new WeakMap<WebSocket, boolean>();
 
@@ -202,6 +212,15 @@ export function createGateway({ redis, pollMs, log, heartbeatMs = 30_000 }: Gate
     }
   }, heartbeatMs);
 
+  // Only clients that have joined a room (i.e. already got their snapshot) receive heartbeats.
+  const heartbeatFrames = setInterval(() => {
+    const frame: LiveHeartbeat = { type: 'heartbeat', ts: Date.now() };
+    const data = JSON.stringify(frame);
+    for (const room of rooms.values()) {
+      for (const ws of room.clients) if (ws.readyState === ws.OPEN) ws.send(data);
+    }
+  }, heartbeatFrameMs);
+
   return {
     server,
     stats: () => ({
@@ -211,6 +230,7 @@ export function createGateway({ redis, pollMs, log, heartbeatMs = 30_000 }: Gate
     /** Close every client with 1001 so browsers reconnect elsewhere, then stop. */
     async close() {
       clearInterval(heartbeat);
+      clearInterval(heartbeatFrames);
       for (const room of rooms.values()) {
         room.closed = true;
         clearTimeout(room.timer);

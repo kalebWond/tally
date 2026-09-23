@@ -25,8 +25,9 @@ export interface Standing extends Entrant {
 
 export const emptyTotals = (): Totals => ({ totals: new Map(), totalVotes: 0 });
 
-/** Snapshots replace everything; updates overwrite only the contestants they name. */
+/** Snapshots replace everything; updates overwrite only the contestants they name; heartbeats change nothing. */
 export function applyFrame(state: Totals, frame: LiveMessage): Totals {
+  if (frame.type === 'heartbeat') return state;
   if (frame.type === 'snapshot') {
     return {
       totals: new Map(frame.totals.map((t) => [t.contestantId, t.total])),

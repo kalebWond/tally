@@ -88,6 +88,18 @@ body {
 .board-status[data-state="connecting"]::before {
   background: var(--warn);
 }
+.board-status[data-state="reconnecting"] {
+  color: var(--ink);
+  border-color: color-mix(in srgb, var(--warn) 50%, var(--line));
+}
+.board-status[data-state="reconnecting"]::before {
+  background: var(--warn);
+  animation: pulse 0.9s ease-in-out infinite;
+}
+.board-status[data-state="unavailable"]::before {
+  background: var(--live);
+}
+
 .board-count {
   display: grid;
   justify-items: end;
@@ -208,6 +220,28 @@ body {
   font-size: 13px;
 }
 
+/* Disconnected: keep the last totals on screen, visibly frozen. */
+.board-stale {
+  margin: -12px 0 0;
+  color: var(--warn);
+  font:
+    600 14px / 1.4 var(--font-display),
+    sans-serif;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.board-rows,
+.board-count-value {
+  transition:
+    opacity 300ms ease,
+    filter 300ms ease;
+}
+.board[data-stale] .board-rows,
+.board[data-stale] .board-count-value {
+  opacity: 0.5;
+  filter: saturate(0.3);
+}
+
 @media (max-width: 520px) {
   .row {
     grid-template-columns: 1.8rem 5px 40px minmax(0, 1fr) auto;
@@ -242,6 +276,9 @@ body {
   }
 }
 @media (prefers-reduced-motion: reduce) {
+  .board-status[data-state="reconnecting"]::before {
+    animation: none;
+  }
   .board-status[data-state="live"]::before {
     animation: none;
   }

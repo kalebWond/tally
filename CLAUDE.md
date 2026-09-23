@@ -120,8 +120,8 @@ A feature is done when its check in `IMPLEMENTATION_PLAN.md` passes, tests cover
 
 Update this section as you go.
 
-**Last completed:** F10, reorder animation (2026-09-23)
-**Next up:** F11, connection handling. `useLiveTotals` has a `connection` state but no reconnect yet; the gateway closes with 1001 on shutdown.
+**Last completed:** F11, connection handling (2026-09-23)
+**Next up:** F12, Go vote generator. It POSTs to ingest (`VoteRequest` in contracts; mirror it in Go with a contract test). Go isn't installed on the host: build and test in the `golang:1.27-alpine` container.
 
 **Seed contest:** `0192f3a0-7c1e-7000-8000-00000000c0de`, codes `C1`–`C10`.
 

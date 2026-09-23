@@ -31,8 +31,24 @@ export const LiveUpdate = z.object({
 });
 export type LiveUpdate = z.infer<typeof LiveUpdate>;
 
-export const LiveMessage = z.discriminatedUnion('type', [LiveSnapshot, LiveUpdate]);
+/**
+ * Sent every HEARTBEAT_MS. The browser can't see WebSocket-level pings and updates only flow when
+ * totals change, so without this a silently dead connection (dropped Wi-Fi, sleeping laptop)
+ * would look live indefinitely.
+ */
+export const LiveHeartbeat = z.object({
+  type: z.literal('heartbeat'),
+  ts: z.number().int(),
+});
+export type LiveHeartbeat = z.infer<typeof LiveHeartbeat>;
+
+export const LiveMessage = z.discriminatedUnion('type', [LiveSnapshot, LiveUpdate, LiveHeartbeat]);
 export type LiveMessage = z.infer<typeof LiveMessage>;
+
+/** Gateway sends a heartbeat at least this often. */
+export const HEARTBEAT_MS = 15_000;
+/** A client that hears nothing for this long treats the connection as dead and reconnects. */
+export const STALE_AFTER_MS = 35_000;
 
 /** Application close codes (4000–4999 range reserved for apps by RFC 6455). */
 export const LiveCloseCodes = {

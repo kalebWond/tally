@@ -18,8 +18,46 @@ interface Props {
 const STATUS_LABEL: Record<ConnectionState, string> = {
   connecting: 'Connecting',
   live: 'Live',
+  reconnecting: 'Reconnecting',
   offline: 'Offline',
+  unavailable: 'Unavailable',
 };
+
+/** Seconds until `at`, re-rendered every second while there is something to count down to. */
+function useSecondsUntil(at: number | null) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (at === null) return;
+    setNow(Date.now());
+    const tick = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(tick);
+  }, [at]);
+  return at === null ? null : Math.max(0, Math.ceil((at - now) / 1000));
+}
+
+/** Tells viewers the numbers are frozen, and what the page is doing about it. */
+function StaleNote({
+  connection,
+  retryAt,
+}: {
+  connection: ConnectionState;
+  retryAt: number | null;
+}) {
+  const seconds = useSecondsUntil(retryAt);
+  const action =
+    connection === 'offline'
+      ? 'you are offline, will reconnect when the network returns'
+      : connection === 'unavailable'
+        ? 'this contest cannot be streamed'
+        : seconds
+          ? `reconnecting in ${seconds}s`
+          : 'reconnecting…';
+  return (
+    <p className="board-stale" role="status">
+      Showing last known totals · {action}
+    </p>
+  );
+}
 
 /** How often, at most, to re-fetch contestant details when an unknown id shows up. */
 const REFRESH_COOLDOWN_MS = 5000;
@@ -67,7 +105,9 @@ function useMovements(orderKey: string) {
 }
 
 export function LiveStandings({ contest, entrants, gatewayUrl }: Props) {
-  const { totals, totalVotes, connection, synced } = useLiveTotals(gatewayUrl, contest.id);
+  const { totals, totalVotes, connection, synced, retryAt } = useLiveTotals(gatewayUrl, contest.id);
+  // Totals shown but not current: keep them visible, dimmed, with a note.
+  const stale = synced && connection !== 'live';
   const standings = useMemo(() => rank(entrants, totals), [entrants, totals]);
   const moving = useMovements(standings.map((s) => s.id).join(','));
 
@@ -85,7 +125,7 @@ export function LiveStandings({ contest, entrants, gatewayUrl }: Props) {
   return (
     // Reduced-motion users get instant reorders and counters.
     <MotionConfig reducedMotion="user">
-      <main className="board">
+      <main className="board" data-stale={stale || undefined}>
         <header className="board-head">
           <div className="board-title">
             <span className="board-status" data-state={connection}>
@@ -106,6 +146,8 @@ export function LiveStandings({ contest, entrants, gatewayUrl }: Props) {
             <span className="board-count-label">votes</span>
           </div>
         </header>
+
+        {stale && <StaleNote connection={connection} retryAt={retryAt} />}
 
         <ol className="board-rows" aria-label="Standings">
           {standings.map((s, i) => (

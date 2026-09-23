@@ -147,6 +147,23 @@ describe('gateway /live', () => {
     expect((await client.closed).code).toBe(LiveCloseCodes.invalidContest);
   });
 
+  it('sends a heartbeat to idle clients so they can tell a quiet feed from a dead one', async () => {
+    await gateway.close();
+    gateway = createGateway({
+      redis,
+      pollMs: POLL_MS,
+      heartbeatFrameMs: 100,
+      log: pino({ level: 'silent' }),
+    });
+    await new Promise<void>((resolve) => gateway.server.listen(0, '127.0.0.1', resolve));
+    url = `ws://127.0.0.1:${(gateway.server.address() as AddressInfo).port}`;
+
+    const client = connect();
+    await until(() => client.frames.filter((f) => f.msg.type === 'heartbeat').length >= 2);
+    expect(client.frames[0]?.msg.type).toBe('snapshot'); // heartbeats never precede the snapshot
+    client.ws.close();
+  });
+
   it('stops polling a contest once its last client leaves', async () => {
     const client = connect();
     await until(() => client.frames.length === 1);

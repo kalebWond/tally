@@ -213,6 +213,8 @@ Only changed contestants are sent after the initial snapshot.
 
 *Decided (F7):* both frames also carry `contestId`, `totalVotes` and `ts`. Totals are `[{ contestantId, total }]` with **absolute** values, and `changed` holds only contestants whose total differs from the previous frame. Close codes: `4400` invalid `contestId`, `1001` shutdown. Redis is polled once per watched contest every 250 ms. Contestant names and colours come from the web app, not the gateway. `GET /debug` serves a dev inspector page.
 
+*Changed (F11):* the gateway also sends `{ "type": "heartbeat", "ts" }` every 15 s; a client that hears nothing for 35 s treats the connection as dead. Clients reconnect forever with jittered backoff (0.5 s → 10 s), and every reconnect starts with a fresh snapshot.
+
 ### Generator control (Go)
 ```
 POST /start   { ratePerSec, contestId, invalidCodeRatio }

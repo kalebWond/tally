@@ -114,3 +114,10 @@ describe('unknownIds', () => {
     expect(unknownIds([entrant(1)], totals)).toEqual([id(99)]);
   });
 });
+
+describe('applyFrame — heartbeat', () => {
+  it('leaves the totals untouched (it only proves the connection is alive)', () => {
+    const state = applyFrame(emptyTotals(), snapshot([[1, 5]], 5));
+    expect(applyFrame(state, { type: 'heartbeat', ts: 3 })).toBe(state);
+  });
+});

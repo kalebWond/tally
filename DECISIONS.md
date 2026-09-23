@@ -21,6 +21,7 @@ Where the build departs from `SPEC.md` or `IMPLEMENTATION_PLAN.md`, or pins down
 | Commits (plan working rules, CLAUDE.md) | commit at each feature boundary, feature number in the message | the user commits, using the project skill `/feature-commit`: `F<n>: subject` plus a what/why body. One exception in history: F3 went in as `a977aca feat(ingest): …`, written with the device-level conventional `commit-msg` skill | F3 |
 | Layout (CLAUDE.md) | no package for the database | new `packages/db` (Drizzle schema, client, migrate, seed). Migrations in `infra/migrations`. CLAUDE.md layout updated | F2 |
 | Frontend stack (CLAUDE.md, SPEC §9) | Motion **and** react-countup | Motion only: counters retarget a `useSpring`; react-countup dropped because its updates restart the animation (the stutter CLAUDE.md warns about) | F9 |
+| Gateway protocol (SPEC §7) | snapshot on connect, then updates | plus `{ type: "heartbeat", ts }` every 15 s; clients treat 35 s of silence as a dead connection | F11 |
 | Redis sync (SPEC §5 keys, plan F5) | "increment the Redis counter"; `tally:idem:{key}` string, 1 h TTL, as a redelivery guard | Redis is **set** to absolute totals read back from Postgres (upward only, via Lua). No `tally:idem:*` keys: Postgres's unique `idempotency_key` is the only dedupe | F5 |
 | Unresolvable votes (plan F6, SPEC §5 `contestant_id` null = unresolved) | dead-lettering is F6; unresolved votes could sit in `votes` with a null contestant | F5 writes them to `dead_letters` (`unknown_code` / `malformed`); `votes.contestant_id` is never null in practice. F6 adds publishing to `votes.dead` | F5 |
 | `dead_letters` columns (SPEC §5) | id, raw payload, reason, received_at | plus a unique, nullable `idempotency_key` (the vote's key, or `offset:topic/partition/offset`) so replays don't duplicate dead letters | F5 |
@@ -56,6 +57,8 @@ Where the build departs from `SPEC.md` or `IMPLEMENTATION_PLAN.md`, or pins down
 | shadcn/ui timing (stack lists it) | deferred to F13/F14, where forms need it; the results list is custom | F8 |
 | Counter behaviour | first snapshot shows instantly (no count-up on load); later totals spring, overdamped so a count never overshoots or goes backwards; reduced motion jumps | F9 |
 | Reorder animation | Motion `layout="position"` on ID-keyed rows, no-bounce 0.45 s spring; the overtaking row draws above the rows it passes and its accent edge glows for 0.8 s; instant for reduced motion | F10 |
+| Reconnect policy | never gives up; jittered exponential backoff 0.5 s → 10 s cap; `4400` never retries, `1001` retries in < 1 s; backoff resets on snapshot, not on open; pauses while the browser is offline | F11 |
+| Connection states | `Connecting` / `Live` (after snapshot) / `Reconnecting` / `Offline` / `Unavailable`; stale totals stay visible, dimmed, with a "reconnecting in Ns" note | F11 |
 
 ### Outstanding: a rule not met yet
 
@@ -331,3 +334,32 @@ Headless Chrome sampled every row's on-screen position every frame.
 - **Controls on the dev server:** real 19 in-between frames; `layout` removed: **0** (snaps); rows keyed by index: **0** (rows stay put and contents swap, the classic mistake). The storm check passes for controls too, as it should with nothing animating; it guards against animation debris, not the slide itself.
 
 **Observed, not changed:** on a large burst, the row reorders immediately (sorting uses the real totals) while its counter is still springing up, so for about 0.4 s a row can sit above one showing a bigger number (seen mid-overtake: 647 above 931). Sorting by displayed values instead would delay overtakes behind the counter animation. Left as is; revisit if it reads badly on the demo video.
+
+## F11 — Reconnect forever with jittered backoff; close codes decide urgency
+
+**Decided:** a pure policy (`lib/reconnect.ts`, unit-tested). Backoff doubles from 0.5 s to a 10 s cap, with jitter in the upper half of each step. `4400` (invalid contest) never retries. `1001` (gateway restarting) retries in 0.25–0.75 s. Anything else backs off. The attempt counter resets only when a **snapshot** arrives, not when the socket opens. Retries never stop. While the browser is offline the hook waits for the `online` event instead of burning attempts.
+**Why:** the jitter matters when a gateway restarts under many viewers: without it every screen reconnects in the same instant. The floor stops a down gateway being hammered by near-zero delays. An unattended projector screen has to heal itself, so it never gives up. Resetting on the snapshot rather than on `open` means a gateway that accepts connections but can't read Redis still backs off.
+**Resync:** every connection starts with a snapshot, which replaces totals wholesale (F8's `applyFrame`), so recovery needs no extra protocol. Counters spring to the corrected values (F9).
+
+## F11 — App-level heartbeat and a 35 s stale watchdog
+
+**Decided:** the gateway sends `{ type: "heartbeat", ts }` every 15 s (`HEARTBEAT_MS`) to clients that have their snapshot. The client resets a 35 s watchdog (`STALE_AFTER_MS`) on *any* frame, and on expiry treats the connection as dead (code 1006) and reconnects. `applyFrame` ignores heartbeats.
+**Alternatives:** rely on the browser noticing closes.
+**Why:** browsers can't see WebSocket pings, and updates only flow when totals change, so a silently dead connection (dropped Wi-Fi, sleeping laptop, frozen process) would show "Live" indefinitely. **Measured:** with the gateway frozen (`docker compose pause`, socket open), the page noticed at 34.0 s. Left idle for 50 s with no votes and a healthy gateway, it stayed `Live` throughout, so the heartbeat prevents false alarms.
+
+## F11 — Disconnected UI: frozen, dimmed, explained
+
+**Decided:** status states are `Connecting`, `Live` (only after a snapshot), `Reconnecting` (amber pulse), `Offline` and `Unavailable`. When not live, the board keeps the last totals but dims them (50% opacity, desaturated), with a note: "Showing last known totals · reconnecting in 4s".
+**Why:** a viewer glancing at the numbers must be able to tell they're frozen, and blanking the board would lose information.
+
+## F11 — How "disconnect, reconnect, resync without refresh" was verified
+
+Headless Chrome on the containerised stack. In each case 30 votes were sent while the gateway was down (the consumer kept counting into Postgres and Redis), then the page was compared row by row with Postgres after recovery:
+
+| Gateway | Noticed | Live again after restart | Rows match Postgres |
+|---|---|---|---|
+| `stop` (1001) | 0.3 s | 2.4 s | ✓ |
+| `kill` (no close frame) | 0.2 s | 2.3 s | ✓ |
+| `pause` (socket open, silent) | 34.0 s | 1.0 s | ✓ |
+
+One page load across all three (`performance.getEntriesByType("navigation").length === 1`).
