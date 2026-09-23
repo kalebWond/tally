@@ -1,0 +1,99 @@
+# Default: infrastructure only — run services on the host with `pnpm dev`.
+# `docker compose --profile app up` adds every service in a container.
+
+name: tally
+
+x-node-service: &node-service
+  profiles: [app]
+  restart: unless-stopped
+  environment: &service-env
+    LOG_LEVEL: ${LOG_LEVEL:-info}
+    KAFKA_BROKERS: redpanda:9092
+    DATABASE_URL: postgres://${POSTGRES_USER:-tally}:${POSTGRES_PASSWORD:-tally}@postgres:5432/${POSTGRES_DB:-tally}
+    REDIS_URL: redis://redis:6379
+  depends_on:
+    redpanda: { condition: service_healthy }
+    postgres: { condition: service_healthy }
+    redis: { condition: service_healthy }
+
+services:
+  redpanda:
+    image: redpandadata/redpanda:v26.2.3
+    command:
+      - redpanda
+      - start
+      - --mode=dev-container
+      - --smp=1
+      - --memory=1G
+      - --default-log-level=warn
+      # Two listeners: containers dial redpanda:9092, host-run services dial localhost:19092.
+      - --kafka-addr=internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr=internal://redpanda:9092,external://localhost:19092
+    ports:
+      - "19092:19092"
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -Eq 'Healthy:.+true'"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+
+  postgres:
+    image: postgres:18.6-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-tally}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tally}
+      POSTGRES_DB: ${POSTGRES_DB:-tally}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:8.8-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+
+  ingest:
+    <<: *node-service
+    build: { context: ., dockerfile: services/ingest/Dockerfile }
+    ports: ["4000:4000"]
+
+  gateway:
+    <<: *node-service
+    build: { context: ., dockerfile: services/gateway/Dockerfile }
+    ports: ["4001:4001"]
+
+  consumer:
+    <<: *node-service
+    build: { context: ., dockerfile: services/consumer/Dockerfile }
+    ports: ["4003:4003"]
+
+  web:
+    <<: *node-service
+    build: { context: ., dockerfile: apps/web/Dockerfile }
+    ports: ["3000:3000"]
+
+  generator:
+    profiles: [app]
+    restart: unless-stopped
+    build: { context: tools/generator }
+    ports: ["4002:4002"]
+
+volumes:
+  redpanda-data:
+  postgres-data:
+  redis-data:

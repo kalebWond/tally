@@ -1,0 +1,123 @@
+# CLAUDE.md
+
+Project instructions for Claude Code. Read this before touching anything.
+
+---
+
+## What this is
+
+**Tally** — a real-time voting platform. Votes arrive over HTTP, flow through a Kafka-compatible queue, get aggregated by a consumer, and appear on a live results screen with animated counters.
+
+It's a portfolio project modelled on a production SMS voting system built for a live televised contest. The telecom feed is replaced by a controllable Go load generator.
+
+Full detail lives in `SPEC.md`. Build order lives in `IMPLEMENTATION_PLAN.md`. Don't restate them here — read them.
+
+---
+
+## Working agreement
+
+**One feature per session.** Find the current feature in `IMPLEMENTATION_PLAN.md`, build it, satisfy its "done when" check, stop. Don't start the next feature because there's time left.
+
+**Write the check first.** Every feature has a done-when condition. Make it verifiable before writing the implementation.
+
+**Ask, don't assume.** If the spec doesn't cover something — a field name, an error shape, a library choice — ask. Guessing creates work to undo later.
+
+**Log decisions.** Anything non-obvious goes in `DECISIONS.md` as a short entry: what was decided, what the alternatives were, why. This file becomes the case study and interview prep, so it matters.
+
+**Commit per feature.** Message format: `F7: realtime gateway`.
+
+---
+
+## Stack
+
+TypeScript everywhere except the load generator, which is Go.
+
+- Frontend: Next.js, Tailwind, shadcn/ui, Motion, react-countup, Recharts
+- Backend: Fastify (ingest), plain Node services (consumer, gateway)
+- Queue: Redpanda, Kafka API
+- Data: PostgreSQL with Drizzle, Redis, ClickHouse (later phase)
+- Generator: Go
+- Local: Docker Compose
+- Tests: Vitest
+
+---
+
+## Running locally
+
+- `docker compose up -d` starts infrastructure only (Redpanda, Postgres, Redis). Run services on the host with `pnpm dev` (TS) and `go run .` in `tools/generator`. Host services read `.env` (copy from `.env.example`).
+- `docker compose --profile app up -d --build` runs the full stack in containers. Use it for demos, recordings, and checking the Dockerfiles.
+- Redpanda: containers use `redpanda:9092`, the host uses `localhost:19092`.
+- `pnpm lint` (Biome), `pnpm typecheck`, `pnpm test` (Vitest), `pnpm check:health`.
+- Every new service gets its own Dockerfile and a compose entry under the `app` profile when it's created.
+
+---
+
+## Layout
+
+```
+apps/web                    Next.js — results, admin, generator control
+services/ingest             Fastify — validate and publish
+services/consumer           aggregate into Postgres + Redis
+services/gateway            WebSocket fan-out
+services/analytics-consumer ClickHouse writer (later)
+tools/generator             Go load generator
+packages/contracts          Zod schemas and shared types
+infra/                      compose files, migrations, k8s (optional, later)
+```
+
+---
+
+## Rules that aren't negotiable
+
+**The ingest path stays thin.** Validate, hash, publish, return 202. No database reads or writes in the request path. Adding a query here defeats the architecture.
+
+**Never store raw sender identifiers.** Hash with the salt from the environment, immediately, before anything is persisted or logged.
+
+**Never drop a vote silently.** Anything that can't be resolved goes to `votes.dead` with a reason. No swallowed errors.
+
+**Consumers must be idempotent.** The queue delivers at least once. The same message arriving twice must not change any total.
+
+**Config comes from the environment.** No config files, no hardcoded hosts, no state on local disk. This is what makes the optional Kubernetes phase additive rather than a rewrite. Don't break it.
+
+**Every service needs `/health` and graceful SIGTERM shutdown.** Same reason.
+
+**Schemas live in `packages/contracts`.** Defined once with Zod, imported everywhere. Don't redefine an event shape inside a service. The Go generator mirrors these structs and has a contract test.
+
+**Postgres is truth, Redis is speed.** Redis must always be rebuildable from the Postgres vote log. Don't put anything in Redis that exists nowhere else.
+
+---
+
+## Frontend specifics
+
+**Counter animations retarget, they don't restart.** Updates arrive faster than animations finish. Each new total is a new target the running animation springs toward. Starting a fresh animation per update causes visible stutter. This is the single most common way to get the UI wrong.
+
+**Reordering is animated by the layout system**, not by re-rendering the list. Rows should glide past each other on an overtake — that's the moment the whole project is built around.
+
+**One component, two layouts.** The card grid arriving in a later phase must reuse the list's component and data path with a layout flag. Don't fork them.
+
+**No photographs of real public figures** in seed data or demos. Generated or illustrated avatars only — likeness and IP issues on a public portfolio piece.
+
+---
+
+## Testing
+
+Test the logic that would be embarrassing to get wrong: idempotency, code resolution, dead-letter routing, counter aggregation, the snapshot-delta protocol.
+
+Don't write tests that assert framework behaviour or restate the implementation.
+
+---
+
+## Definition of done
+
+A feature is done when its check in `IMPLEMENTATION_PLAN.md` passes, tests cover the core logic, `docker compose --profile app up` still brings the whole stack up cleanly (and `scripts/check-health.sh` passes), nothing from the rules above was violated, and `DECISIONS.md` has an entry if anything non-obvious was chosen.
+
+---
+
+## Current state
+
+Update this section as you go.
+
+**Last completed:** F1, monorepo and local stack (2026-09-23)
+**Next up:** F2, database schema and seed
+
+**Known gaps:** `apps/web` (Next standalone) exits on SIGTERM with 143 without draining. Revisit when web gains API routes (F13/F14). Go isn't installed on the dev machine yet; the generator currently runs only via the `app` profile.
