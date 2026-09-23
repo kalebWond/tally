@@ -125,8 +125,8 @@ A feature is done when its check in `IMPLEMENTATION_PLAN.md` passes, tests cover
 
 Update this section as you go.
 
-**Last completed:** F23, metrics and dashboards (2026-09-24)
-**Next up:** F24, card grid view (see `IMPLEMENTATION_PLAN.md`; CLAUDE.md "One component, two layouts" applies). Outstanding: the k6 spike regression since F19 (DECISIONS, F23).
+**Last completed:** F24, card grid view (2026-09-24)
+**Next up:** F25, Remotion results recap (a composition reading a finished contest's data; a render command producing an MP4). Outstanding: the k6 spike regression (DECISIONS, F23).
 
 **Seed contest:** `0192f3a0-7c1e-7000-8000-00000000c0de`, codes `C1`–`C10`.
 

@@ -249,6 +249,8 @@ Build one feature per session. Each has a goal, a build list, and a check that d
 
 **Build:** Card component — portrait, name, optional flag, live count, gradient from accent colours. Layout toggle between list and grid.
 
+*Decided (F24):* `ContestantRow` with a `layout` flag and an identical element tree (CSS arranges the card); `?view=grid` via `replaceState`; flag emoji from the country code. Verified: the same DOM nodes before and after switching, no reconnect, counters still springing, overtakes glide across the grid.
+
 **Done when:** Both views share one data path and one component, and switching preserves live updates and animation.
 
 ---

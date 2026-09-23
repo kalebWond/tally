@@ -22,6 +22,7 @@ export default async function ResultsPage(props: PageProps<'/results/[contestId]
       contest={{ ...contest, opensAt: contest.opensAt?.toISOString() ?? null }}
       entrants={entrants}
       gatewayUrl={serverEnv().GATEWAY_PUBLIC_URL}
+      initialLayout={(await props.searchParams).view === 'grid' ? 'grid' : 'list'}
     />
   );
 }

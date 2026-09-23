@@ -87,6 +87,7 @@ Where the build departs from `SPEC.md` or `IMPLEMENTATION_PLAN.md`, or pins down
 | ClickHouse schema | versioned migrations in `services/analytics-consumer/src/schema.ts` (`_migrations` table, applied at startup); `votes_raw` ORDER BY `(contest_id, sent_at, idempotency_key)`; both tables gain `key_hash UInt64 MATERIALIZED cityHash64(idempotency_key)`; `votes_dead.sent_at` = the original vote's; readers count votes as `uniqExact(key_hash)`, counted = accepted − rejected per minute | F21 |
 | Analytics page | `/admin/analytics?contest=` (operator, password-protected), data from `GET /api/analytics/:contestId`, ClickHouse only; refreshes every 15 s. Counted = distinct raw keys not in the contest's dead letters | F22 |
 | Metrics | `GET /metrics` (Prometheus text) on ingest, consumer, gateway, analytics-consumer, web and generator; shared `@tally/metrics` (prom-client, `service` label, `tally_` prefix); consumer lag from Redpanda's `public_metrics` (high watermark − committed offset); Prometheus (9090, 5 s scrapes) and Grafana (3001, anonymous viewer, dashboard `tally` provisioned from `infra/grafana`) in the `app` profile | F23 |
+| Card grid | results page `?view=grid` (default list), toggled on the page without a navigation; `ContestantRow` takes `layout: 'list' \| 'grid'`, sets `data-layout`, and keeps an identical element tree, with CSS grid areas arranging it; flag emoji from the country code | F24 |
 
 ### Outstanding: a rule not met yet
 
@@ -662,4 +663,17 @@ Generator at 800 votes/s for 90 s, a burst to 3,000/s for 45 s (SPEC's burst tar
 - **Spike and recovery:** totals consumer lag rose from a median of 64 to **480** messages during the burst, and was back under 100 within the burst's last seconds (median afterwards 40). The throughput panel shows the plateau (3,000 accepted and counted), ingest p95 rises from 7 to 9 ms, batch size from 80 to 300, and batch time from 25 to 95 ms: all visible on the same timeline.
 - **Every panel has data** (14 panels, all queries returned series).
 - **Honest note:** the check's "10× baseline and at least 1,000 messages" threshold was set before I'd seen a healthy system at this rate. The consumer absorbs a 3,000/s burst with a 7.5× spike (480 messages), and on its own-scale panel that's unmistakable. An earlier run, before the ClickHouse and Postgres fixes, spiked to 78k and took over a minute and a half to drain. The same panel shows that case even more clearly.
+
+## F24 — One element tree, two arrangements
+**Decided:** the card is the list row. `ContestantRow` takes a `layout` flag, which becomes a `data-layout` attribute on the same `motion.li`, with the same children: rank, accent stripe, avatar, name and meta, animated total. CSS grid areas rearrange them into a card: stripe on top, a larger avatar, centred name, rank and total at the foot, and a gradient from the two accent colours. Because nothing in the tree changes, switching layouts can't remount anything. The counter's spring, the overtake treatment and the `layout="position"` reorder carry straight on, and cards glide across the grid on an overtake the way rows do in the list. The toggle keeps its state in `?view=grid` through `history.replaceState`: shareable (a broadcast screen can open in the grid), with no navigation and no server round trip, so the WebSocket stays open. The flag is an emoji built from the country code's regional indicator letters, so no image is fetched and no flag set is licensed.
+**Alternatives:** a separate `ContestantCard` (CLAUDE.md forbids forking; it would also remount on every switch and restart every counter); a server navigation for the toggle (a round trip, and a reconnect).
+**Not done:** the list-to-grid switch itself isn't animated. Rows jump to their card positions, because `layout="position"` deliberately doesn't animate size (scaling would distort text). Only reorders glide.
+
+## F24 — How "one data path, one component; switching preserves live updates and animation" was verified
+Headless Chrome, generator at 800 votes/s. Before switching, every row and counter element was tagged with a JavaScript property. 10 of 10 checks passed:
+- **One component:** after switching to the grid (4 columns), all 10 rows and 10 counters were the *same DOM nodes*, and again after switching back.
+- **One data path:** the gateway's snapshot frame count didn't change across both switches, so the socket never reconnected; no navigation either (`performance` shows one load).
+- **Live and animated in the grid:** the total rose 5,785,911 → 5,788,319 in 3 s, and the counter showed 121 distinct values in 121 frames, never backwards.
+- **Overtake in the grid:** in a temporary 4-contestant contest ("F24 Grid Check", left closed), 50 votes took G4 from last to first. Its card moved from (946, 212) to (226, 212) through 25 in-between frames: a glide, not a jump.
+- The check's Chrome runs in its own process group, and the whole group is killed at the end: no stray renderers this time.
 

@@ -7,7 +7,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { type Movement, movements } from '@/lib/movement';
 import { type Entrant, rank, unknownIds } from '@/lib/standings';
 import { AnimatedNumber } from './animated-number';
-import { ContestantRow } from './contestant-row';
+import { ContestantRow, type Layout } from './contestant-row';
 import { type ConnectionState, useLiveTotals } from './use-live-totals';
 import { VotesPerMinute } from './votes-per-minute';
 
@@ -15,6 +15,8 @@ interface Props {
   contest: { id: string; name: string; status: ContestStatus; opensAt: string | null };
   entrants: Entrant[];
   gatewayUrl: string;
+  /** From `?view=`, so a broadcast link can open straight into the grid. */
+  initialLayout: Layout;
 }
 
 const STATUS_LABEL: Record<ConnectionState | 'final' | 'draft', string> = {
@@ -114,7 +116,16 @@ function useMovements(orderKey: string) {
   return marks;
 }
 
-export function LiveStandings({ contest, entrants, gatewayUrl }: Props) {
+export function LiveStandings({ contest, entrants, gatewayUrl, initialLayout }: Props) {
+  const [layout, setLayout] = useState<Layout>(initialLayout);
+  // Kept in the URL without a navigation: no server round trip, and the live socket stays open.
+  const switchLayout = (next: Layout) => {
+    setLayout(next);
+    const url = new URL(window.location.href);
+    if (next === 'list') url.searchParams.delete('view');
+    else url.searchParams.set('view', next);
+    window.history.replaceState(window.history.state, '', url);
+  };
   const { totals, totalVotes, status, minutes, minutesTo, connection, synced, retryAt } =
     useLiveTotals(gatewayUrl, contest.id);
   // The gateway's status (F16) wins, so a close shows without a reload; it is null when Redis
@@ -154,27 +165,44 @@ export function LiveStandings({ contest, entrants, gatewayUrl }: Props) {
             </span>
             <h1>{contest.name}</h1>
           </div>
-          <div className="board-count">
-            {synced ? (
-              <AnimatedNumber
-                className="board-count-value"
-                value={totalVotes}
-                data-testid="total-votes"
-              />
-            ) : (
-              <span className="board-count-value">–</span>
-            )}
-            <span className="board-count-label">votes</span>
+          <div className="board-side">
+            <fieldset className="board-layout">
+              <legend className="sr-only">Layout</legend>
+              {(['list', 'grid'] as const).map((l) => (
+                <button
+                  key={l}
+                  type="button"
+                  aria-pressed={layout === l}
+                  data-testid={`layout-${l}`}
+                  onClick={() => switchLayout(l)}
+                >
+                  {l === 'list' ? 'List' : 'Grid'}
+                </button>
+              ))}
+            </fieldset>
+            <div className="board-count">
+              {synced ? (
+                <AnimatedNumber
+                  className="board-count-value"
+                  value={totalVotes}
+                  data-testid="total-votes"
+                />
+              ) : (
+                <span className="board-count-value">–</span>
+              )}
+              <span className="board-count-label">votes</span>
+            </div>
           </div>
         </header>
 
         {stale && <StaleNote connection={connection} retryAt={retryAt} />}
 
-        <ol className="board-rows" aria-label="Standings">
+        <ol className="board-rows" data-layout={layout} aria-label="Standings">
           {standings.map((s, i) => (
             <ContestantRow
               key={s.id}
               standing={s}
+              layout={layout}
               synced={synced}
               leader={i === 0 && s.total > 0}
               movement={moving.get(s.id)?.dir}

@@ -292,6 +292,8 @@ Verified with k6 against the ingest API; results published in the README.
 **Card grid (later phase)**
 Portrait, name, optional flag, live count, gradient from the contestant's two accent colours. Same data and component as the list; a layout flag switches arrangement.
 
+*Decided (F24):* `/results/:id?view=grid`, with a List/Grid toggle on the page; the flag is an emoji from the country code.
+
 Use generated or illustrated avatars. Do not use photographs of real public figures — likeness and IP issues on a public portfolio piece.
 
 ---

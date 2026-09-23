@@ -2,6 +2,7 @@
 
 import { type MotionStyle, motion, type Transition } from 'motion/react';
 import Image from 'next/image';
+import { flagEmoji } from '@/lib/flag';
 import type { Movement } from '@/lib/movement';
 import type { Standing } from '@/lib/standings';
 import { AnimatedNumber } from './animated-number';
@@ -16,8 +17,12 @@ const DEFAULT_TO = '#1F2937';
  */
 const REORDER: Transition = { type: 'spring', bounce: 0, duration: 0.45 };
 
+export type Layout = 'list' | 'grid';
+
 interface Props {
   standing: Standing;
+  /** List row or grid card: the same element and children either way, arranged by CSS (F24). */
+  layout: Layout;
   leader: boolean;
   /** Before the first snapshot the total is unknown, so show a dash rather than a false zero. */
   synced: boolean;
@@ -26,11 +31,15 @@ interface Props {
 }
 
 /**
- * One contestant in the standings. Keyed by contestant id by its parent, which is what lets the
- * layout animation follow it across reorders. F24's card grid reuses this component with a
- * layout flag rather than forking it.
+ * One contestant in the standings, as a list row or a grid card. Keyed by contestant id by its
+ * parent, which is what lets the layout animation follow it across reorders.
+ *
+ * The layout flag changes only an attribute: the element tree is identical in both layouts and
+ * CSS arranges it. Switching therefore never remounts anything, so the counter's spring, the
+ * overtake treatment and the live feed carry straight on (CLAUDE.md: one component, two layouts).
  */
-export function ContestantRow({ standing, leader, synced, movement }: Props) {
+export function ContestantRow({ standing, layout, leader, synced, movement }: Props) {
+  const flag = flagEmoji(standing.countryCode);
   const from = standing.accentFrom ?? DEFAULT_FROM;
   const to = standing.accentTo ?? DEFAULT_TO;
 
@@ -40,6 +49,7 @@ export function ContestantRow({ standing, leader, synced, movement }: Props) {
       layout="position"
       transition={REORDER}
       className="row"
+      data-layout={layout}
       data-leader={leader || undefined}
       data-rising={movement === 'up' || undefined}
       data-code={standing.code}
@@ -73,7 +83,16 @@ export function ContestantRow({ standing, leader, synced, movement }: Props) {
         <span className="row-name">{standing.name}</span>
         <span className="row-meta">
           <span className="row-code">{standing.code}</span>
-          {standing.countryCode && <span className="row-country">{standing.countryCode}</span>}
+          {standing.countryCode && (
+            <span className="row-country">
+              {flag && (
+                <span className="row-flag" aria-hidden="true">
+                  {flag}
+                </span>
+              )}
+              {standing.countryCode}
+            </span>
+          )}
         </span>
       </span>
       {synced ? (
