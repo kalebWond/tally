@@ -162,6 +162,7 @@ func TestVoteMatchesVoteRequestContract(t *testing.T) {
 func TestControlAPIMatchesGeneratorContracts(t *testing.T) {
 	assertMatches(t, "generator-start-request", reflect.TypeFor[StartRequest](), false)
 	assertMatches(t, "generator-burst-request", reflect.TypeFor[BurstRequest](), false)
+	assertMatches(t, "generator-rate-request", reflect.TypeFor[RateRequest](), false)
 	assertMatches(t, "generator-status", reflect.TypeFor[Status](), true)
 	assertMatches(t, "error-response", reflect.TypeFor[ErrorResponse](), true)
 	assertMatches(t, "health-response", reflect.TypeFor[HealthResponse](), false, true)

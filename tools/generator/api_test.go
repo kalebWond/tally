@@ -69,7 +69,16 @@ func TestConflictsAre409(t *testing.T) {
 	if res, _ := post(t, srv, "/burst", `{"ratePerSec":100,"durationSec":1}`); res.StatusCode != http.StatusConflict {
 		t.Fatalf("burst while stopped: %d, want 409", res.StatusCode)
 	}
+	if res, _ := post(t, srv, "/rate", `{"ratePerSec":100}`); res.StatusCode != http.StatusConflict {
+		t.Fatalf("rate while stopped: %d, want 409", res.StatusCode)
+	}
 	post(t, srv, "/start", validStart)
+	if res, body := post(t, srv, "/rate", `{"ratePerSec":0}`); res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("rate 0: %d %s, want 400", res.StatusCode, body)
+	}
+	if res, body := post(t, srv, "/rate", `{"ratePerSec":250}`); res.StatusCode != http.StatusOK || !strings.Contains(string(body), `"baseRate":250`) {
+		t.Fatalf("rate: %d %s", res.StatusCode, body)
+	}
 	if res, _ := post(t, srv, "/start", validStart); res.StatusCode != http.StatusConflict {
 		t.Fatalf("start while running: %d, want 409", res.StatusCode)
 	}

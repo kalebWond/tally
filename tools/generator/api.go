@@ -7,7 +7,7 @@ import (
 	"net/http"
 )
 
-// newMux serves the control API (SPEC §7): POST /start, /burst, /stop and GET /status, /health.
+// newMux serves the control API (SPEC §7): POST /start, /rate, /burst, /stop and GET /status, /health.
 // Every control call answers with the resulting Status.
 func newMux(e *Engine) *http.ServeMux {
 	mux := http.NewServeMux()
@@ -34,6 +34,18 @@ func newMux(e *Engine) *http.ServeMux {
 			InvalidCodeRatio: req.InvalidCodeRatio, DuplicateSenderRatio: req.DuplicateSenderRatio,
 		})
 		respond(w, e, err)
+	})
+
+	mux.HandleFunc("POST /rate", func(w http.ResponseWriter, r *http.Request) {
+		var req RateRequest
+		if !decode(w, r, &req) {
+			return
+		}
+		if issues := validateRate(req.RatePerSec); len(issues) > 0 {
+			writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "invalid_request", Issues: issues})
+			return
+		}
+		respond(w, e, e.SetRate(req.RatePerSec))
 	})
 
 	mux.HandleFunc("POST /burst", func(w http.ResponseWriter, r *http.Request) {
@@ -94,9 +106,7 @@ func validateStart(req StartRequest) []Issue {
 			issues = append(issues, Issue{fmt.Sprintf("codes.%d", i), "must be 1–16 uppercase letters or digits"})
 		}
 	}
-	if req.RatePerSec < minRate || req.RatePerSec > maxRate {
-		issues = append(issues, Issue{"ratePerSec", fmt.Sprintf("must be an integer from %d to %d", minRate, maxRate)})
-	}
+	issues = append(issues, validateRate(req.RatePerSec)...)
 	if req.InvalidCodeRatio < 0 || req.InvalidCodeRatio > 1 {
 		issues = append(issues, Issue{"invalidCodeRatio", "must be between 0 and 1"})
 	}
@@ -106,11 +116,16 @@ func validateStart(req StartRequest) []Issue {
 	return issues
 }
 
+func validateRate(rate int) []Issue {
+	if rate < minRate || rate > maxRate {
+		return []Issue{{"ratePerSec", fmt.Sprintf("must be an integer from %d to %d", minRate, maxRate)}}
+	}
+	return nil
+}
+
 func validateBurst(req BurstRequest) []Issue {
 	var issues []Issue
-	if req.RatePerSec < minRate || req.RatePerSec > maxRate {
-		issues = append(issues, Issue{"ratePerSec", fmt.Sprintf("must be an integer from %d to %d", minRate, maxRate)})
-	}
+	issues = append(issues, validateRate(req.RatePerSec)...)
 	if req.DurationSec < minBurstSec || req.DurationSec > maxBurstSec {
 		issues = append(issues, Issue{"durationSec", fmt.Sprintf("must be an integer from %d to %d", minBurstSec, maxBurstSec)})
 	}

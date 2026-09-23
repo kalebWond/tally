@@ -30,6 +30,15 @@ export async function getEntrants(contestId: string): Promise<Entrant[]> {
     .orderBy(asc(c.code));
 }
 
+/** Every contest, open ones first, for pickers. */
+export async function getContests() {
+  const c = schema.contests;
+  return db()
+    .select({ id: c.id, name: c.name, status: c.status })
+    .from(c)
+    .orderBy(sql`${c.status} = 'open' desc`, desc(c.createdAt));
+}
+
 /** The contest `/` should show: the most recently opened open contest, else the newest one. */
 export async function getCurrentContestId() {
   const c = schema.contests;

@@ -135,6 +135,8 @@ Build one feature per session. Each has a goal, a build list, and a check that d
 
 **Build:** Protected page with start, stop, rate control, burst trigger, and a live status readout.
 
+*Decided (F13):* the shared-password gate is built here, not in F14; the generator gained `POST /rate` for the ramp; the browser reaches the generator only through web route handlers. Verified by clicking through start → ramp → burst → stop in headless Chrome (23/23 checks).
+
 **Done when:** You can drive the entire demo — ramp, burst, stop — from the browser without touching a terminal.
 
 **This is the end of the demo-critical path.** Everything after this adds depth.
@@ -144,6 +146,8 @@ Build one feature per session. Each has a goal, a build list, and a check that d
 ## F14 — Admin: contestants
 
 **Build:** Shared-password middleware. CRUD for contestants including code, image URL, accent colours and country. Codes unique per contest.
+
+*Changed (F13):* the shared-password middleware already exists (`proxy.ts`, `lib/auth.ts`); F14 adds its routes to the matcher and calls `requireAdmin` / `isAdmin`.
 
 **Done when:** A contestant added through the UI can immediately receive votes, and a duplicate code is rejected with a clear error.
 

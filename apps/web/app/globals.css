@@ -1,4 +1,6 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
 
 /* Broadcast scoreboard: a single dark look, built for a projector or a screen recording. */
 :root {
@@ -8,9 +10,71 @@
   --raised: #171c26;
   --line: #242a37;
   --ink: #f3f5f9;
-  --muted: #8b93a5;
+  --ink-dim: #8b93a5;
   --live: #ff3d4f;
   --warn: #f5b041;
+
+  /* shadcn/ui tokens, mapped onto the palette above: one dark theme, no light variant. */
+  --background: var(--ground);
+  --foreground: var(--ink);
+  --card: var(--surface);
+  --card-foreground: var(--ink);
+  --popover: var(--raised);
+  --popover-foreground: var(--ink);
+  --primary: var(--ink);
+  --primary-foreground: var(--ground);
+  --secondary: var(--raised);
+  --secondary-foreground: var(--ink);
+  --muted: var(--raised);
+  --muted-foreground: var(--ink-dim);
+  --accent: var(--raised);
+  --accent-foreground: var(--ink);
+  --destructive: var(--live);
+  --border: var(--line);
+  --input: var(--line);
+  --ring: #5b6478;
+  --chart-1: #4cc2ff;
+  --chart-2: var(--ink-dim);
+  --radius: 0.625rem;
+}
+
+@theme inline {
+  --font-sans: var(--font-body), system-ui, sans-serif;
+  --font-heading: var(--font-display), var(--font-body), sans-serif;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-live: var(--live);
+  --color-warn: var(--warn);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+}
+
+@custom-variant dark (&:is(:root *));
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
 }
 
 body {
@@ -68,14 +132,14 @@ body {
     sans-serif;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--muted);
+  color: var(--ink-dim);
 }
 .board-status::before {
   content: "";
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--muted);
+  background: var(--ink-dim);
 }
 .board-status[data-state="live"] {
   color: var(--ink);
@@ -116,7 +180,7 @@ body {
     sans-serif;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--muted);
+  color: var(--ink-dim);
 }
 
 /* Rows ------------------------------------------------------------------ */
@@ -156,7 +220,7 @@ body {
     sans-serif;
   font-variant-numeric: tabular-nums;
   text-align: right;
-  color: var(--muted);
+  color: var(--ink-dim);
 }
 .row[data-leader] .row-rank {
   color: var(--ink);
@@ -192,7 +256,7 @@ body {
   display: flex;
   gap: 8px;
   font-size: 13px;
-  color: var(--muted);
+  color: var(--ink-dim);
 }
 .row-code,
 .row-country {
@@ -216,7 +280,7 @@ body {
 }
 
 .board-foot {
-  color: var(--muted);
+  color: var(--ink-dim);
   font-size: 13px;
 }
 

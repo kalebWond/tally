@@ -11,3 +11,6 @@ const Env = z.object({
 
 /** Call only after `await connection()`, so values come from the runtime environment. */
 export const serverEnv = () => Env.parse(process.env);
+
+/** The generator's control API, server-side only: the browser never talks to it directly. */
+export const generatorUrl = () => z.url().parse(process.env.GENERATOR_URL);

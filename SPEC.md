@@ -225,7 +225,11 @@ GET  /status  → { running, currentRate, sentTotal }
 
 *Changed (F12):* `/start` also takes `codes` (required; the generator never reads the database) and `duplicateSenderRatio`. `/status` also returns `contestId`, `baseRate`, `burstEndsAt`, `startedAt`, `accepted`, `rejected`, `failed`, `invalidSent`, `duplicateSent` and `latencyMs`. `/start` while running and `/burst` while stopped return 409. Shapes are Zod schemas in contracts (`Generator*`).
 
+*Changed (F13):* `POST /rate { ratePerSec }` changes a running generator's rate without resetting counters (409 when stopped). Browsers never call the generator directly: the control panel goes through the web app's `/api/generator/*` handlers (session-checked), which read the contest's codes from Postgres for `/start`.
+
 ### Admin (web, shared-password protected)
+
+*Decided (F13):* the gate is `ADMIN_PASSWORD` plus a signed, httpOnly session cookie issued by `/login`; it protects `/control` and `/api/generator/*` now, and the admin routes below from F14.
 ```
 GET/POST/PATCH /api/contestants
 GET            /api/dead-letters

@@ -24,6 +24,8 @@ Where the build departs from `SPEC.md` or `IMPLEMENTATION_PLAN.md`, or pins down
 | Gateway protocol (SPEC §7) | snapshot on connect, then updates | plus `{ type: "heartbeat", ts }` every 15 s; clients treat 35 s of silence as a dead connection | F11 |
 | Generator `/start` (SPEC §7) | `{ ratePerSec, contestId, invalidCodeRatio }` | plus required `codes` (the generator never reads the database) and `duplicateSenderRatio`; `/start` while running and `/burst` while stopped → 409; every control call returns the full status | F12 |
 | Generator `/status` (SPEC §7) | `{ running, currentRate, sentTotal }` | adds `contestId`, `baseRate`, `burstEndsAt`, `startedAt`, `accepted`, `rejected`, `failed`, `invalidSent`, `duplicateSent`, `latencyMs {p50,p95,p99}` | F12 |
+| Generator control API (SPEC §7) | `/start`, `/burst`, `/stop`, `/status` | plus `POST /rate { ratePerSec }`: changes a running generator's base rate without resetting counters (409 when stopped); a burst keeps priority until it ends | F13 |
+| Shared-password gate (plan F14) | built in F14 with the admin CRUD | built in F13 for the control panel; F14 reuses it | F13 |
 | Redis sync (SPEC §5 keys, plan F5) | "increment the Redis counter"; `tally:idem:{key}` string, 1 h TTL, as a redelivery guard | Redis is **set** to absolute totals read back from Postgres (upward only, via Lua). No `tally:idem:*` keys: Postgres's unique `idempotency_key` is the only dedupe | F5 |
 | Unresolvable votes (plan F6, SPEC §5 `contestant_id` null = unresolved) | dead-lettering is F6; unresolved votes could sit in `votes` with a null contestant | F5 writes them to `dead_letters` (`unknown_code` / `malformed`); `votes.contestant_id` is never null in practice. F6 adds publishing to `votes.dead` | F5 |
 | `dead_letters` columns (SPEC §5) | id, raw payload, reason, received_at | plus a unique, nullable `idempotency_key` (the vote's key, or `offset:topic/partition/offset`) so replays don't duplicate dead letters | F5 |
@@ -63,12 +65,12 @@ Where the build departs from `SPEC.md` or `IMPLEMENTATION_PLAN.md`, or pins down
 | Connection states | `Connecting` / `Live` (after snapshot) / `Reconnecting` / `Offline` / `Unavailable`; stale totals stay visible, dimmed, with a "reconnecting in Ns" note | F11 |
 | Generator traffic | drifting-race popularity (random walk every 2 s); invalid codes are well-formed so they reach dead letters; synthetic `sim:` senders; one Idempotency-Key per vote | F12 |
 | Go ↔ TS contract test (SPEC §6) | JSON Schemas exported from Zod (drift-tested in TS); Go test checks structs, types, nullability, enums and validation bounds against them | F12 |
+| Admin session | `ADMIN_PASSWORD` (≥ 8 chars; unset = sign-in disabled). httpOnly, SameSite=Lax cookie `tally_admin` = `<expiresAt>.<HMAC>`, 12 h, key scrypt-derived from the password. `/login?next=` (same-site paths only) | F13 |
+| Generator control from the browser | only via web route handlers `/api/generator/{status,start,rate,burst,stop}`, which re-check the session, require JSON, validate with the `Generator*` schemas and call `GENERATOR_URL` server-side. `start` takes no codes: the handler reads them from Postgres | F13 |
 
 ### Outstanding: a rule not met yet
 
-| Rule | Status |
-|---|---|
-| Graceful SIGTERM on every service (CLAUDE.md) | `apps/web` (Next.js standalone) exits 143 without draining. Revisit when web gets API routes (F13/F14) |
+None. *Resolved (F13):* `apps/web`'s exit code 143 on SIGTERM was taken for a missed drain. It isn't: Next's standalone server finishes in-flight requests, then exits with 128 + 15 on purpose. See the F13 entry.
 
 ---
 
@@ -392,3 +394,32 @@ Containerised stack on the dev machine; `ratePerSec: 3000`, 5% invalid, 10% dupl
 - **Dead letters reconcile exactly, not just proportionally:** generator `invalidSent` 9,695 (5.07%) = `votes.dead` +9,695 = `dead_letters` +9,695. `votes` +181,155 = accepted − invalid.
 - **Consumer lag** hovered at 270–540 messages without growing, and drained to 0 within seconds of the stop.
 - **Caveat:** the per-5 s rates in the run log read 3,100–3,250 because each sample loop also ran `docker exec` calls, stretching its interval past 5 s. The whole-run average is the real figure.
+
+## F13 — Password gate brought forward; session is a signed expiry
+**Decided:** the shared-password gate planned for F14 is built now, because F13's panel is the first protected page. `ADMIN_PASSWORD` from the environment; a login page with a server action; on success an httpOnly, SameSite=Lax cookie holding `<expiresAt>.<HMAC-SHA256(expiresAt)>`, valid 12 h. The HMAC key is scrypt-derived from the password, so changing the password signs everyone out and a stolen cookie is expensive to brute-force back into the password. Password comparison is constant-time; a wrong password waits 500 ms. The session is checked twice: `proxy.ts` (Next 16's middleware) redirects or 401s early for `/control` and `/api/generator/*`, and every page and route handler checks it again through `lib/auth.ts`, as Next's docs recommend, so a matcher gap can't expose anything. `Secure` is set when the request arrived over HTTPS (`x-forwarded-proto`).
+**Alternatives:** a separate `SESSION_SECRET` (one more required variable, and the password would still be the thing to protect); a server-side session store (state to keep, which the config rule argues against); a random per-process key (every restart and every replica would sign people out); leaving F13 open until F14 (the panel can start 20,000 votes/s, so it shouldn't be public even briefly).
+**Not done:** lockout after repeated failures, which would need shared state. The 500 ms delay and scrypt key make guessing slow, and this is a one-operator demo.
+
+## F13 — The browser never talks to the generator
+**Decided:** the panel calls web route handlers, which forward to `GENERATOR_URL` server-side with a 3 s timeout. Bodies are validated with the contract schemas on the way in; answers are validated against `GeneratorStatus` / `ErrorResponse` on the way out (502 if the generator answers outside the contract or not at all). Handlers require `Content-Type: application/json`, so a cross-site HTML form can't drive them, on top of SameSite=Lax. `start` takes `{ contestId, ratePerSec, invalidCodeRatio, duplicateSenderRatio }` and the handler reads the contest's codes from Postgres.
+**Why:** the generator has no auth and shouldn't need any. Keeping it off the browser's network path is what makes the password mean something (port 4002 is still published for local debugging; a deployment wouldn't publish it).
+
+## F13 — Ramp is `POST /rate`, not stop and start
+**Decided:** the generator gained `POST /rate { ratePerSec }`: it swaps the run's base rate (now an atomic) without touching counters, the run's start time or the popularity race. 409 when stopped, like `/burst`. During a burst the burst rate keeps priority; the new base rate applies when it ends. Contract: `GeneratorRateRequest` in contracts, exported to JSON Schema, and checked by the Go contract test.
+**Alternatives:** stop and restart at the new rate. That resets the counters and the race, and it leaves a gap in the traffic that shows on the chart and on the results page.
+
+## F13 — Panel: polled status and a delivered-rate chart
+**Decided:** `/control` polls `/api/generator/status` every second. It shows target, delivered and run rate; sent, accepted, rejected, no-answer, invalid and repeat-sender counts; and ingest p50/p95/p99. A Recharts line chart plots target (dashed) against delivered votes/s for the last minute. Delivered is computed from `sentTotal` deltas over the real time between polls (`lib/rate-history.ts`), with a gap rather than a spike or negative value when a new run resets the counters. Chart animation is off: points arrive every second, and re-animating each time would jitter. A control call's response updates the panel at once, without waiting for the next poll.
+**Also:** shadcn/ui set up here (deferred from F8): radix base, tokens mapped onto the scoreboard's dark palette (no light theme), Barlow instead of the default Geist. The scoreboard's `--muted` became `--ink-dim`, because shadcn uses `--muted` as a surface colour.
+
+## F13 — How "drive the whole demo from the browser" was verified
+Headless Chrome against the containerised stack, clicking the panel. Each step was checked against the generator's own `/status` on port 4002 (not through the web app) and Postgres. 23 of 23 checks passed:
+- **Protection:** no session → 401; forged cookie → 401; `/control` → `/login?next=%2Fcontrol`; wrong password → error; right password → panel.
+- **Start** at 500/s with 5% invalid → running, `baseRate` 500.
+- **Ramp** to 2,000/s → same run (`startedAt` unchanged, counters kept); measured 2,010/s.
+- **Burst** 3,000/s for 6 s → panel shows Burst with a countdown; the burst ended by itself and the rate went back to 2,000/s.
+- **Readout:** matches the generator (within one poll); 0 rejected, 0 failed; chart drawn.
+- **Stop** → nothing sent after it.
+- **Pipeline:** Postgres gained 35,041 votes = 36,873 accepted − 1,832 invalid, exactly.
+
+**Web SIGTERM, re-checked:** with the generator paused, a `/api/generator/status` request was in flight when `docker compose stop web` sent SIGTERM. Web waited for that request to finish (it answered 502 at 3.2 s), then exited with 143. Next exits with 128 + signal after its cleanup, on purpose. The earlier "exits without draining" note was wrong and is closed.

@@ -122,6 +122,9 @@ services:
       <<: *service-env
       # As the browser sees it, not as containers do: the page connects from the viewer's machine.
       GATEWAY_PUBLIC_URL: ${GATEWAY_PUBLIC_URL:-ws://localhost:4001}
+      GENERATOR_URL: http://generator:4002
+      # Empty if unset in .env; sign-in is then disabled rather than open.
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
     depends_on:
       redpanda: { condition: service_healthy }
       postgres: { condition: service_healthy }

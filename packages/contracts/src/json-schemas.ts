@@ -1,5 +1,10 @@
 import { z } from 'zod';
-import { GeneratorBurstRequest, GeneratorStartRequest, GeneratorStatus } from './generator.ts';
+import {
+  GeneratorBurstRequest,
+  GeneratorRateRequest,
+  GeneratorStartRequest,
+  GeneratorStatus,
+} from './generator.ts';
 import { HealthResponse } from './health.ts';
 import { ErrorResponse, VoteRequest } from './vote.ts';
 
@@ -18,6 +23,7 @@ export function jsonSchemas(): Record<string, unknown> {
     'error-response': z.toJSONSchema(ErrorResponse, { io: 'output' }),
     'generator-start-request': z.toJSONSchema(GeneratorStartRequest, { io: 'input' }),
     'generator-burst-request': z.toJSONSchema(GeneratorBurstRequest, { io: 'input' }),
+    'generator-rate-request': z.toJSONSchema(GeneratorRateRequest, { io: 'input' }),
     'generator-status': z.toJSONSchema(GeneratorStatus, { io: 'output' }),
   };
 }

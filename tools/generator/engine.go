@@ -52,7 +52,7 @@ type Engine struct {
 
 type run struct {
 	cfg       RunConfig
-	baseRate  int
+	baseRate  atomic.Int64
 	burstRate atomic.Int64
 	burstEnds atomic.Int64 // epoch ms; 0 when no burst
 	startedAt int64
@@ -91,7 +91,8 @@ func (e *Engine) Start(cfg RunConfig) error {
 		return errAlreadyRunning
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	r := &run{cfg: cfg, baseRate: cfg.RatePerSec, startedAt: time.Now().UnixMilli(), cancel: cancel}
+	r := &run{cfg: cfg, startedAt: time.Now().UnixMilli(), cancel: cancel}
+	r.baseRate.Store(int64(cfg.RatePerSec))
 	st := &stats{}
 	e.run, e.stats = r, st
 
@@ -200,6 +201,19 @@ func (e *Engine) Burst(rate, durationSec int) error {
 	return nil
 }
 
+// SetRate changes the running generator's base rate, the ramp. Counters carry on; a burst in
+// progress keeps priority until it ends, then the new base rate applies.
+func (e *Engine) SetRate(rate int) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.run == nil {
+		return errNotRunning
+	}
+	e.run.baseRate.Store(int64(rate))
+	e.log.Info("rate", "rate", rate)
+	return nil
+}
+
 // Stop ends the run and waits until no more requests will be sent. Safe to call when stopped.
 func (e *Engine) Stop() {
 	e.mu.Lock()
@@ -218,7 +232,7 @@ func (r *run) rateAt(now time.Time) int {
 	if now.UnixMilli() < r.burstEnds.Load() {
 		return int(r.burstRate.Load())
 	}
-	return r.baseRate
+	return int(r.baseRate.Load())
 }
 
 func (e *Engine) Status() Status {
@@ -239,7 +253,7 @@ func (e *Engine) Status() Status {
 		now := time.Now()
 		s.Running = true
 		s.ContestID = &r.cfg.ContestID
-		s.BaseRate = r.baseRate
+		s.BaseRate = int(r.baseRate.Load())
 		s.CurrentRate = r.rateAt(now)
 		s.StartedAt = &r.startedAt
 		if ends := r.burstEnds.Load(); ends > now.UnixMilli() {

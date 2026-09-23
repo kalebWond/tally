@@ -124,6 +124,42 @@ func TestBurstRaisesTheRateThenFallsBack(t *testing.T) {
 	}
 }
 
+func TestSetRateRampsWithoutResettingTheRun(t *testing.T) {
+	ingest := newFakeIngest(t)
+	e := newTestEngine(ingest.srv.URL)
+	startRun(t, e, 200)
+	time.Sleep(time.Second)
+	before := e.Status()
+	if err := e.SetRate(1500); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(time.Second)
+	after := e.Status()
+	e.Stop()
+
+	if after.BaseRate != 1500 || after.CurrentRate != 1500 || *after.StartedAt != *before.StartedAt {
+		t.Fatalf("after ramp: %+v", after)
+	}
+	if got := after.SentTotal - before.SentTotal; !near(got, 1500, 0.1) {
+		t.Fatalf("second after the ramp sent %d, want ~1500", got)
+	}
+	if after.SentTotal < before.SentTotal {
+		t.Fatalf("counters reset by the ramp: %d → %d", before.SentTotal, after.SentTotal)
+	}
+}
+
+func TestSetRateDuringABurstAppliesWhenItEnds(t *testing.T) {
+	ingest := newFakeIngest(t)
+	e := newTestEngine(ingest.srv.URL)
+	startRun(t, e, 100)
+	defer e.Stop()
+	_ = e.Burst(2000, 60)
+	_ = e.SetRate(300)
+	if s := e.Status(); s.CurrentRate != 2000 || s.BaseRate != 300 {
+		t.Fatalf("burst should keep priority: %+v", s)
+	}
+}
+
 func TestStopHaltsSending(t *testing.T) {
 	ingest := newFakeIngest(t)
 	e := newTestEngine(ingest.srv.URL)
@@ -152,11 +188,14 @@ func TestNon202AnswersAreCountedAsRejected(t *testing.T) {
 	}
 }
 
-func TestStartWhileRunningAndBurstWhileStoppedAreRefused(t *testing.T) {
+func TestStartWhileRunningAndBurstOrRateWhileStoppedAreRefused(t *testing.T) {
 	ingest := newFakeIngest(t)
 	e := newTestEngine(ingest.srv.URL)
 	if err := e.Burst(1000, 1); err != errNotRunning {
 		t.Fatalf("burst while stopped: %v, want errNotRunning", err)
+	}
+	if err := e.SetRate(1000); err != errNotRunning {
+		t.Fatalf("rate while stopped: %v, want errNotRunning", err)
 	}
 	startRun(t, e, 10)
 	defer e.Stop()

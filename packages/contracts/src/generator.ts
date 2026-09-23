@@ -27,11 +27,15 @@ export const GeneratorBurstRequest = z.object({
 });
 export type GeneratorBurstRequest = z.infer<typeof GeneratorBurstRequest>;
 
+/** `POST /rate`: change the running generator's base rate; counters carry on. 409 when stopped. */
+export const GeneratorRateRequest = z.object({ ratePerSec: Rate });
+export type GeneratorRateRequest = z.infer<typeof GeneratorRateRequest>;
+
 /** `GET /status` and the response of every control call. Counters cover the current or last run. */
 export const GeneratorStatus = z.object({
   running: z.boolean(),
   contestId: z.uuid().nullable(),
-  /** Rate set by /start. */
+  /** Rate set by /start or /rate. */
   baseRate: z.number().int().nonnegative(),
   /** Rate in effect now: the burst rate during a burst, otherwise baseRate; 0 when stopped. */
   currentRate: z.number().int().nonnegative(),

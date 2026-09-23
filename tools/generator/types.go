@@ -28,6 +28,11 @@ type BurstRequest struct {
 	DurationSec int `json:"durationSec"`
 }
 
+// RateRequest is the body of POST /rate (contracts: GeneratorRateRequest).
+type RateRequest struct {
+	RatePerSec int `json:"ratePerSec"`
+}
+
 // Latency percentiles of ingest responses, in milliseconds.
 type Latency struct {
 	P50 float64 `json:"p50"`

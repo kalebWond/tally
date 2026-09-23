@@ -121,9 +121,11 @@ A feature is done when its check in `IMPLEMENTATION_PLAN.md` passes, tests cover
 
 Update this section as you go.
 
-**Last completed:** F12, Go vote generator (2026-09-23)
-**Next up:** F13, generator control panel. Use the `Generator*` Zod schemas in contracts; the panel reads codes from Postgres and passes them to `/start`. shadcn/ui gets set up here (deferred from F8).
+**Last completed:** F13, generator control panel (2026-09-23)
+**Next up:** F14, admin: contestants. The password gate exists: add the admin paths to the `proxy.ts` matcher, and call `requireAdmin(path)` in pages and `isAdmin()` in route handlers. shadcn/ui is set up (`components/ui`, add more with `pnpm dlx shadcn@latest add <name>` in `apps/web`).
 
 **Seed contest:** `0192f3a0-7c1e-7000-8000-00000000c0de`, codes `C1`–`C10`.
 
-**Known gaps:** `apps/web` (Next standalone) exits on SIGTERM with 143 without draining. Revisit when web gains API routes (F13/F14). Go isn't installed on the dev machine yet; the generator currently runs only via the `app` profile.
+**Operator pages:** `/control` (generator panel), behind `ADMIN_PASSWORD` from `.env`.
+
+**Known gaps:** Go isn't installed on the dev machine; `scripts/go.sh` runs it in a container.
