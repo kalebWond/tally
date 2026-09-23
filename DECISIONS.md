@@ -28,6 +28,7 @@ Where the build departs from `SPEC.md` or `IMPLEMENTATION_PLAN.md`, or pins down
 | Shared-password gate (plan F14) | built in F14 with the admin CRUD | built in F13 for the control panel; F14 reuses it | F13 |
 | Dead-letter reasons (SPEC §6) | `unknown_code`, `contest_closed`, `malformed` | plus `inactive_contestant`: a vote for a deactivated contestant. Postgres enum gained the value (migration `0002`) | F14 |
 | Consumer code cache (F5 decision) | resolved codes cached for the process lifetime; misses for 5 s | every lookup, hit or miss, is re-checked after 5 s, so (de)activation reaches running consumers | F14 |
+| `dead_letters` columns (SPEC §5) | id, raw payload, reason, received_at | plus `contest_id` (nullable uuid, no FK), written by the consumer and backfilled from payloads; indexed with reason and id | F15 |
 | Redis sync (SPEC §5 keys, plan F5) | "increment the Redis counter"; `tally:idem:{key}` string, 1 h TTL, as a redelivery guard | Redis is **set** to absolute totals read back from Postgres (upward only, via Lua). No `tally:idem:*` keys: Postgres's unique `idempotency_key` is the only dedupe | F5 |
 | Unresolvable votes (plan F6, SPEC §5 `contestant_id` null = unresolved) | dead-lettering is F6; unresolved votes could sit in `votes` with a null contestant | F5 writes them to `dead_letters` (`unknown_code` / `malformed`); `votes.contestant_id` is never null in practice. F6 adds publishing to `votes.dead` | F5 |
 | `dead_letters` columns (SPEC §5) | id, raw payload, reason, received_at | plus a unique, nullable `idempotency_key` (the vote's key, or `offset:topic/partition/offset`) so replays don't duplicate dead letters | F5 |
@@ -72,6 +73,7 @@ Where the build departs from `SPEC.md` or `IMPLEMENTATION_PLAN.md`, or pins down
 | Contestant API | `GET /api/contestants?contestId=` (inactive included, with vote counts), `POST` → 201 / 409 `conflict` on a taken code, `PATCH /api/contestants/:id` (strict: `code` and `contestId` → 400). Schemas `ContestantCreate` / `ContestantUpdate` / `Contestant` in contracts | F14 |
 | Contestant fields | code as `VoteCode` (trimmed, uppercased) and fixed after creation; name 1–80; `imageUrl` https only; accents `#RRGGBB` stored uppercase; country ISO alpha-2 checked against `Intl.DisplayNames` | F14 |
 | Deactivation | `active = false`: later votes dead-lettered as `inactive_contestant`, earlier votes and totals kept, hidden from results pages and from the generator's `/start` codes. Reversible | F14 |
+| Dead-letter API | `GET /api/dead-letters?contestId=&reason=&before=\|after=&limit=` → `{ items, older, newer }` (keyset cursors on id, newest first, limit 1–200, default 50); `GET /api/dead-letters/counts?contestId=&since=` → `{ total, byReason, latestId }`. Contracts `DeadLetterQuery` / `DeadLetterPage` / `DeadLetterCounts` | F15 |
 
 ### Outstanding: a rule not met yet
 
@@ -457,3 +459,27 @@ Headless Chrome with two tabs against the containerised stack: a results page le
 - **Duplicate:** C3 → under the code field: "C3 is already used by Ada Lunetti in this contest. Codes are unique per contest."; still one C3; the API gives 409 for `c3` too.
 - **Fixed code:** `PATCH { code }` → 400.
 - **Deactivate** with the switch: votes dead-lettered as `inactive_contestant` 1.8 s later, earlier votes still counted, and a fresh results page leaves it out.
+
+## F15 — Keyset pages, not numbered ones
+**Decided:** newest first, paged by id (`before` / `after` cursors), never OFFSET. A page is always the same rows, however many new dead letters arrive while someone reads it (they get higher ids), and a deep page costs what page 1 costs. The `older` / `newer` cursors are set only when a row exists on that side (one indexed `exists` each), so there's never an empty last page. Per-reason counts sit on the filter chips instead of a page total.
+**Alternatives:** numbered pages with a total. Rows shift between pages while a run is going (150+ new per second at 3,000 votes/s with 5% invalid), and OFFSET gets slower as the table heads for millions in F19.
+
+## F15 — The contest is a column, not a JSON lookup
+**Decided:** `dead_letters.contest_id` (nullable uuid). The consumer writes the vote's contest; malformed messages get null. Migration `0003` adds the column, backfills it from payloads (only a well-formed UUID is taken, because malformed payloads can hold anything) and adds indexes on `(contest_id, id)`, `(reason, id)` and `(contest_id, reason, id)`, one per filter combination. No FK: an `unknown_code` vote can name a contest that doesn't exist, and it must still be recorded. The page defaults to the current contest; "All contests" includes malformed messages.
+**Alternatives:** filter on `payload->>'contest_id'` (needs an expression index anyway, and is harder to read); reason-only filtering (fine with one contest, wrong once there are two).
+
+## F15 — "N new" banner instead of a moving list
+**Decided:** the page polls `/counts?since=<newest id at load>` every 3 s and shows "610 new dead letters since this page loaded · Show newest". The list only changes when asked, so a row being read never scrolls away. The page is server-rendered with the filter and cursor in the URL, so any view can be linked to. Times show in UTC, so the server render and the browser agree.
+**Not done:** actions (requeue, delete). The page only views, as the plan says. Requeueing votes dead-lettered while a contestant was inactive raises fairness and idempotency questions; that belongs in its own feature if it's wanted.
+
+## F15 — Test support
+`@tally/db/testing` exports `createTestDatabase()`: a throwaway migrated and seeded database, for web's integration test of the keyset query. It walks 120 rows while 30 more arrive, pages back with `after`, and checks filters and counts. Mutation-checked: `<=` instead of `<` in the cursor fails 3 of its 5 tests. The consumer's own test support is older and left as it is.
+**Observed:** `services/gateway`'s "two clients receive identical frames within a second" failed once in 6 full-suite runs (it passed 3 of 3 runs on its own), because it's timing-sensitive when the whole suite shares the machine. Not changed in F15; watch it.
+
+## F15 — How "votes rejected during a generator run are visible with accurate reasons" was verified
+Headless Chrome on the containerised stack; a real run at 1,000 votes/s with 10% invalid codes, C10 deactivated 3 s in, and two malformed messages produced straight onto `votes.raw` with `rpk`. 13 of 13 checks passed:
+- **While the run went on,** the open page showed "610 new dead letters since this page loaded" and didn't move by itself.
+- **Unknown code** rose by **868 = the generator's `invalidSent` of 868**, exactly. **Inactive contestant** rose by 111, all C10.
+- **Every reason is true of its rows:** no `unknown_code` row's code exists in its contest, every `inactive_contestant` row is C10, malformed rows have no contest, and no dead letter was also counted as a vote (`0|0|0|0`).
+- **Malformed:** both injected messages appear under All contests; expanding a row shows `{ "hello": "not a vote" }`.
+- **Paging:** 4 pages gave 200 rows, with no repeats, strictly newest first; "Newer" returns exactly the previous page.

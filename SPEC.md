@@ -144,7 +144,7 @@ Index on `(contest_id, received_at)` and unique index on `idempotency_key`.
 | count | integer | |
 
 ### `dead_letters`
-Mirrors the `votes.dead` topic for the admin view: id, raw payload, reason, received_at.
+Mirrors the `votes.dead` topic for the admin view: id, raw payload, reason, received_at. *Changed (F15):* also `contest_id` (nullable, no FK) for filtering, indexed with reason and id.
 
 *Decided (F2):* `id bigserial`, `payload jsonb`, `reason` enum (`dead_letter_reason`), `received_at timestamptz`. *Changed (F5):* plus a unique, nullable `idempotency_key` (the vote's key, or `offset:topic/partition/offset` for malformed messages) so replays never duplicate dead letters. Contestants with votes can't be deleted because of the FKs, so they are deactivated (`active = false`).
 
@@ -232,6 +232,8 @@ GET  /status  → { running, currentRate, sentTotal }
 *Decided (F13):* the gate is `ADMIN_PASSWORD` plus a signed, httpOnly session cookie issued by `/login`; it protects `/control` and `/api/generator/*` now, and the admin routes below from F14.
 
 *Decided (F14):* `GET /api/contestants?contestId=`, `POST /api/contestants` (409 on a taken code), `PATCH /api/contestants/:id`. The code can't change after creation; `{ active: false }` deactivates (no delete). Schemas `ContestantCreate` / `ContestantUpdate` in contracts.
+
+*Decided (F15):* `GET /api/dead-letters?contestId=&reason=&before=|after=&limit=` is keyset-paginated, newest first, answering `{ items, older, newer }`; `GET /api/dead-letters/counts?contestId=&since=` gives per-reason counts. View only.
 ```
 GET/POST/PATCH /api/contestants
 GET            /api/dead-letters

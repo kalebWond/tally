@@ -45,10 +45,16 @@ function parse(m: InboundMessage): VoteEvent | NewDeadLetter {
   return event.success ? event.data : deadLetter(json, 'malformed', positionKey(m));
 }
 
-const deadLetter = (payload: unknown, reason: DeadLetterReason, key: string): NewDeadLetter => ({
+const deadLetter = (
+  payload: unknown,
+  reason: DeadLetterReason,
+  key: string,
+  contestId: string | null = null,
+): NewDeadLetter => ({
   payload,
   reason,
   idempotencyKey: key,
+  contestId,
 });
 
 const isDeadLetter = (x: VoteEvent | NewDeadLetter): x is NewDeadLetter => 'reason' in x;
@@ -83,7 +89,7 @@ export async function processBatch(messages: InboundMessage[], deps: Deps): Prom
     const resolved = await deps.resolver.resolve(parsed.contest_id, parsed.code);
     if (resolved.kind !== 'counted') {
       const reason = resolved.kind === 'unknown' ? 'unknown_code' : 'inactive_contestant';
-      dead.push(deadLetter(parsed, reason, parsed.idempotency_key));
+      dead.push(deadLetter(parsed, reason, parsed.idempotency_key, parsed.contest_id));
       continue;
     }
     votes.push({

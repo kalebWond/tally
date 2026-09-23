@@ -159,6 +159,8 @@ Build one feature per session. Each has a goal, a build list, and a check that d
 
 **Build:** Paginated dead-letter browser with reason filters.
 
+*Decided (F15):* keyset pagination on id (newest first); contest filter via a new `dead_letters.contest_id` column; a "N new" banner instead of a moving list; view only. Verified on a 10%-invalid run: the Unknown-code count rose by exactly the generator's invalid count (868 = 868).
+
 **Done when:** Votes rejected during a generator run are visible with accurate reasons.
 
 ---

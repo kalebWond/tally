@@ -186,6 +186,24 @@ describe('processBatch', () => {
     await stores.db.execute(sql`update contestants set active = true where code = 'C3'`);
   });
 
+  it('records the contest a dead-lettered vote named, and null when the message was malformed', async () => {
+    const elsewhere = '00000000-0000-4000-8000-000000000000';
+    await processBatch(
+      asMessages([voteEvent('ZZ9'), voteEvent('C1', { contest_id: elsewhere }), 'not json at all']),
+      deps(),
+    );
+    const rows = await stores.db
+      .select({ reason: schema.deadLetters.reason, contestId: schema.deadLetters.contestId })
+      .from(schema.deadLetters);
+    expect(rows).toEqual(
+      expect.arrayContaining([
+        { reason: 'unknown_code', contestId: CONTEST_ID },
+        { reason: 'unknown_code', contestId: elsewhere },
+        { reason: 'malformed', contestId: null },
+      ]),
+    );
+  });
+
   it('replaying dead letters does not duplicate them', async () => {
     const batch = asMessages([voteEvent('ZZ9'), 'not json at all']);
     await processBatch(batch, deps());

@@ -20,5 +20,11 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/control/:path*', '/admin/:path*', '/api/generator/:path*', '/api/contestants/:path*'],
+  matcher: [
+    '/control/:path*',
+    '/admin/:path*',
+    '/api/generator/:path*',
+    '/api/contestants/:path*',
+    '/api/dead-letters/:path*',
+  ],
 };

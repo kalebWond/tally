@@ -94,14 +94,28 @@ export const voteBuckets = pgTable(
 );
 
 /** Mirrors the votes.dead topic for the admin view. */
-export const deadLetters = pgTable('dead_letters', {
-  id: bigserial('id', { mode: 'number' }).primaryKey(),
-  /**
-   * Replay guard: the vote's idempotency key, or `topic/partition/offset` for a message too
-   * malformed to have one. Unique, so reprocessing the log never duplicates a dead letter.
-   */
-  idempotencyKey: text('idempotency_key').unique(),
-  payload: jsonb('payload').notNull(),
-  reason: deadLetterReason('reason').notNull(),
-  receivedAt: timestamptz('received_at').notNull().defaultNow(),
-});
+export const deadLetters = pgTable(
+  'dead_letters',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    /**
+     * Replay guard: the vote's idempotency key, or `topic/partition/offset` for a message too
+     * malformed to have one. Unique, so reprocessing the log never duplicates a dead letter.
+     */
+    idempotencyKey: text('idempotency_key').unique(),
+    /**
+     * The contest the vote named, for filtering; null when the message was too malformed to
+     * say. No FK: an `unknown_code` vote may name a contest that doesn't exist.
+     */
+    contestId: uuid('contest_id'),
+    payload: jsonb('payload').notNull(),
+    reason: deadLetterReason('reason').notNull(),
+    receivedAt: timestamptz('received_at').notNull().defaultNow(),
+  },
+  // The admin browser pages newest-first by id under each filter combination.
+  (t) => [
+    index('dead_letters_contest_id_idx').on(t.contestId, t.id),
+    index('dead_letters_reason_id_idx').on(t.reason, t.id),
+    index('dead_letters_contest_reason_id_idx').on(t.contestId, t.reason, t.id),
+  ],
+);

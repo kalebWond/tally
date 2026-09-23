@@ -45,3 +45,11 @@ export function readParam<S extends z.ZodType>(schema: S, value: unknown, name: 
         ]),
       };
 }
+
+/** Validates the whole query string against a schema; the 400 lists every bad parameter. */
+export function readQuery<S extends z.ZodType>(url: URL, schema: S) {
+  const parsed = schema.safeParse(Object.fromEntries(url.searchParams));
+  return parsed.success
+    ? { data: parsed.data as z.output<S> }
+    : { response: apiError(400, 'invalid_request', issuesFrom(parsed.error)) };
+}
