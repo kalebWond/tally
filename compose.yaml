@@ -79,6 +79,10 @@ services:
 
   ingest:
     <<: *node-service
+    environment:
+      <<: *service-env
+      # Empty if unset in .env; ingest then refuses to start with a clear error.
+      VOTER_HASH_SALT: ${VOTER_HASH_SALT:-}
     build: { context: ., dockerfile: services/ingest/Dockerfile }
     ports: ["4000:4000"]
 

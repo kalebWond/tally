@@ -119,8 +119,8 @@ A feature is done when its check in `IMPLEMENTATION_PLAN.md` passes, tests cover
 
 Update this section as you go.
 
-**Last completed:** F2, database schema and seed (2026-09-23)
-**Next up:** F3, ingest API
+**Last completed:** F3, ingest API (2026-09-23)
+**Next up:** F4, publish to Redpanda (replace `logPublisher` in `services/ingest/src/publisher.ts`)
 
 **Seed contest:** `0192f3a0-7c1e-7000-8000-00000000c0de`, codes `C1`–`C10`.
 
