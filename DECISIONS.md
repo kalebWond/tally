@@ -26,6 +26,8 @@ Where the build departs from `SPEC.md` or `IMPLEMENTATION_PLAN.md`, or pins down
 | Generator `/status` (SPEC §7) | `{ running, currentRate, sentTotal }` | adds `contestId`, `baseRate`, `burstEndsAt`, `startedAt`, `accepted`, `rejected`, `failed`, `invalidSent`, `duplicateSent`, `latencyMs {p50,p95,p99}` | F12 |
 | Generator control API (SPEC §7) | `/start`, `/burst`, `/stop`, `/status` | plus `POST /rate { ratePerSec }`: changes a running generator's base rate without resetting counters (409 when stopped); a burst keeps priority until it ends | F13 |
 | Shared-password gate (plan F14) | built in F14 with the admin CRUD | built in F13 for the control panel; F14 reuses it | F13 |
+| Dead-letter reasons (SPEC §6) | `unknown_code`, `contest_closed`, `malformed` | plus `inactive_contestant`: a vote for a deactivated contestant. Postgres enum gained the value (migration `0002`) | F14 |
+| Consumer code cache (F5 decision) | resolved codes cached for the process lifetime; misses for 5 s | every lookup, hit or miss, is re-checked after 5 s, so (de)activation reaches running consumers | F14 |
 | Redis sync (SPEC §5 keys, plan F5) | "increment the Redis counter"; `tally:idem:{key}` string, 1 h TTL, as a redelivery guard | Redis is **set** to absolute totals read back from Postgres (upward only, via Lua). No `tally:idem:*` keys: Postgres's unique `idempotency_key` is the only dedupe | F5 |
 | Unresolvable votes (plan F6, SPEC §5 `contestant_id` null = unresolved) | dead-lettering is F6; unresolved votes could sit in `votes` with a null contestant | F5 writes them to `dead_letters` (`unknown_code` / `malformed`); `votes.contestant_id` is never null in practice. F6 adds publishing to `votes.dead` | F5 |
 | `dead_letters` columns (SPEC §5) | id, raw payload, reason, received_at | plus a unique, nullable `idempotency_key` (the vote's key, or `offset:topic/partition/offset`) so replays don't duplicate dead letters | F5 |
@@ -67,6 +69,9 @@ Where the build departs from `SPEC.md` or `IMPLEMENTATION_PLAN.md`, or pins down
 | Go ↔ TS contract test (SPEC §6) | JSON Schemas exported from Zod (drift-tested in TS); Go test checks structs, types, nullability, enums and validation bounds against them | F12 |
 | Admin session | `ADMIN_PASSWORD` (≥ 8 chars; unset = sign-in disabled). httpOnly, SameSite=Lax cookie `tally_admin` = `<expiresAt>.<HMAC>`, 12 h, key scrypt-derived from the password. `/login?next=` (same-site paths only) | F13 |
 | Generator control from the browser | only via web route handlers `/api/generator/{status,start,rate,burst,stop}`, which re-check the session, require JSON, validate with the `Generator*` schemas and call `GENERATOR_URL` server-side. `start` takes no codes: the handler reads them from Postgres | F13 |
+| Contestant API | `GET /api/contestants?contestId=` (inactive included, with vote counts), `POST` → 201 / 409 `conflict` on a taken code, `PATCH /api/contestants/:id` (strict: `code` and `contestId` → 400). Schemas `ContestantCreate` / `ContestantUpdate` / `Contestant` in contracts | F14 |
+| Contestant fields | code as `VoteCode` (trimmed, uppercased) and fixed after creation; name 1–80; `imageUrl` https only; accents `#RRGGBB` stored uppercase; country ISO alpha-2 checked against `Intl.DisplayNames` | F14 |
+| Deactivation | `active = false`: later votes dead-lettered as `inactive_contestant`, earlier votes and totals kept, hidden from results pages and from the generator's `/start` codes. Reversible | F14 |
 
 ### Outstanding: a rule not met yet
 
@@ -423,3 +428,32 @@ Headless Chrome against the containerised stack, clicking the panel. Each step w
 - **Pipeline:** Postgres gained 35,041 votes = 36,873 accepted − 1,832 invalid, exactly.
 
 **Web SIGTERM, re-checked:** with the generator paused, a `/api/generator/status` request was in flight when `docker compose stop web` sent SIGTERM. Web waited for that request to finish (it answered 502 at 3.2 s), then exited with 143. Next exits with 128 + signal after its cleanup, on purpose. The earlier "exits without draining" note was wrong and is closed.
+
+## F14 — Codes are fixed; the resolver re-checks every 5 s
+**Decided:** a contestant's code can't change after creation (`PATCH` with `code` is a 400); everything else can. The consumer's resolver no longer caches hits for ever: every answer, found or not, is trusted for 5 s, then Postgres is asked again. It returns `counted`, `unknown` or `inactive`.
+**Why:** consumers cache code → contestant. An editable code would need that cache invalidated in every consumer at once, or old codes would keep resolving and a reused code could count for the wrong person. With the code fixed, the only thing that changes is `active`, and a 5 s expiry is enough for that. Cost: one small query per code per 5 s per consumer, which the test pins at 2 queries for 500 lookups of 2 codes.
+**Alternatives:** editable codes with invalidation over Redis pub/sub or a Kafka topic (more moving parts for a typo fix); editable until the first vote (racy at exactly the moment it matters). To fix a typo'd code: deactivate it and add a new contestant.
+
+## F14 — Deactivate, don't delete
+**Decided:** no DELETE (SPEC §7 lists none, and the FKs forbid deleting a contestant with votes). Deactivating keeps its votes and totals, dead-letters later votes as `inactive_contestant` (a new reason, so they're never dropped silently and F15 can show why), hides it from results pages and leaves it out of the codes `/api/generator/start` sends. Results pages load inactive contestants too, but `rank` skips them. Otherwise their totals, still in Redis, would look like "a contestant this page doesn't know" and trigger a refresh every 5 s.
+**Known limit:** a results page that is already open keeps showing a contestant deactivated after it loaded, until it reloads. The contest total still includes an inactive contestant's earlier votes; they were real.
+
+## F14 — Duplicate codes are Postgres's call
+**Decided:** `POST` inserts and maps the unique violation (`23505` on `contestants_contest_code_unique`) to **409** with `{ path: "code", message: "C3 is already used by Ada Lunetti in this contest. …" }`; a missing contest (FK `23503`) is a 400 on `contestId`. No check-then-insert.
+**Why:** a pre-check races: two admins adding the same code at once would both pass it. Codes are uppercased before the insert, so `c3` collides with `C3`.
+
+## F14 — Admin UI
+**Decided:** `/admin/contestants` (and `/admin` redirects there), behind the F13 gate; the proxy matcher now covers `/admin/*` and `/api/contestants/*`. A table with avatar, code, name, country, accent swatch, vote count, an active switch and edit. Add and edit share one dialog form. Field errors come from the server's `ErrorResponse` and show under the field they name. "Generate" fills a DiceBear illustrated avatar URL from the name: `avatarUrl()` now lives in contracts, and the seed uses it too. A shared top bar links Generator and Contestants and has sign-out. Request checks shared by all admin routes moved to `lib/api.ts`.
+
+## F14 — Found on the way: typecheck was red at the root
+`pnpm typecheck` across the workspace failed twice. Both failures were in earlier features' code and hidden because each feature ran its own package's typecheck. `packages/contracts` had no Node types for the F12 schema export script and drift test (TS 7 includes no `@types` by default; fixed with `"types": ["node"]`). `services/consumer` used an instantiation expression on the overloaded `consumer.consume` (F6), which TS 7 rejects; it now uses the library's `MessagesStream` type. The root `pnpm typecheck` is part of the check from now on.
+
+## F14 — How "added through the UI, immediately receives votes; duplicate rejected clearly" was verified
+Headless Chrome with two tabs against the containerised stack: a results page left open, and the admin page. 20 of 20 checks passed:
+- **Protection:** no session → 401; `/admin/contestants` → login → back.
+- **Add through the dialog** (code typed lowercase, generated avatar, colours, `fr`): stored as `CODE|FR|#22D3EE|avatar|active`.
+- **Immediately:** a brand-new code counts its first vote **168 ms** after save, measured separately and including the whole pipeline. Worst case: a vote for the code *before* it existed (correctly dead-lettered `unknown_code`) caches a miss, and votes counted **5.2 s** after save, inside the 5 s window plus pipeline time. None of the 10 votes sent while waiting was lost: each was counted or dead-lettered.
+- **The results page that was already open** showed the new row (10 → 11) with no reload.
+- **Duplicate:** C3 → under the code field: "C3 is already used by Ada Lunetti in this contest. Codes are unique per contest."; still one C3; the API gives 409 for `c3` too.
+- **Fixed code:** `PATCH { code }` → 400.
+- **Deactivate** with the switch: votes dead-lettered as `inactive_contestant` 1.8 s later, earlier votes still counted, and a fresh results page leaves it out.

@@ -1,5 +1,6 @@
+import { unauthorized } from '@/lib/api';
 import { isAdmin } from '@/lib/auth';
-import { callGenerator, unauthorized } from '@/lib/generator';
+import { callGenerator } from '@/lib/generator';
 
 export async function GET() {
   if (!(await isAdmin())) return unauthorized();

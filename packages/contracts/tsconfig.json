@@ -1,4 +1,6 @@
 {
   "extends": "../../tsconfig.base.json",
+  // The schema export script and its drift test read and write files.
+  "compilerOptions": { "types": ["node"] },
   "include": ["src", "scripts"]
 }

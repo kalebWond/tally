@@ -1,7 +1,8 @@
 import { GeneratorBurstRequest } from '@tally/contracts';
-import { callGenerator, readControlRequest } from '@/lib/generator';
+import { readAdminJson } from '@/lib/api';
+import { callGenerator } from '@/lib/generator';
 
 export async function POST(request: Request) {
-  const req = await readControlRequest(request, GeneratorBurstRequest);
+  const req = await readAdminJson(request, GeneratorBurstRequest);
   return 'response' in req ? req.response : callGenerator('/burst', req.data);
 }

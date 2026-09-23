@@ -178,7 +178,7 @@ Topic `votes.raw`, partitioned by `code` so all votes for one contestant stay or
 }
 ```
 
-Topic `votes.dead` carries the original payload plus `reason` (`unknown_code`, `contest_closed`, `malformed`) and `failed_at`.
+Topic `votes.dead` carries the original payload plus `reason` (`unknown_code`, `contest_closed`, `malformed`) and `failed_at`. *Changed (F14):* also `inactive_contestant`, a vote for a deactivated contestant.
 
 *Changed (F6):* the message is an envelope, `{ "v": 1, "reason", "failed_at", "idempotency_key", "original" }`, where `original` is the message as received (the parsed JSON, or `{ "raw": "…" }` if it wasn't JSON). Delivery is at-least-once: a redelivered or replayed batch republishes its dead letters with the same `idempotency_key` and `failed_at`. Keyed by the original `code` when present.
 
@@ -230,6 +230,8 @@ GET  /status  → { running, currentRate, sentTotal }
 ### Admin (web, shared-password protected)
 
 *Decided (F13):* the gate is `ADMIN_PASSWORD` plus a signed, httpOnly session cookie issued by `/login`; it protects `/control` and `/api/generator/*` now, and the admin routes below from F14.
+
+*Decided (F14):* `GET /api/contestants?contestId=`, `POST /api/contestants` (409 on a taken code), `PATCH /api/contestants/:id`. The code can't change after creation; `{ active: false }` deactivates (no delete). Schemas `ContestantCreate` / `ContestantUpdate` in contracts.
 ```
 GET/POST/PATCH /api/contestants
 GET            /api/dead-letters

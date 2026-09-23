@@ -163,6 +163,29 @@ describe('processBatch', () => {
     expect((await snapshot()).total).toBe(1);
   });
 
+  it('dead-letters votes for a deactivated contestant as inactive_contestant; earlier votes stay counted', async () => {
+    await processBatch(asMessages([voteEvent('C3'), voteEvent('C3')]), deps());
+    await stores.db.execute(sql`update contestants set active = false where code = 'C3'`);
+
+    const late = voteEvent('C3');
+    const result = await processBatch(asMessages([late, voteEvent('C4')]), deps()); // fresh resolver
+
+    expect(result).toMatchObject({ counted: 1, dead: 1 });
+    expect(deadPublished).toEqual([
+      expect.objectContaining({
+        reason: 'inactive_contestant',
+        idempotency_key: late.idempotency_key,
+      }),
+    ]);
+    expect(await snapshot()).toMatchObject({
+      votes: 3,
+      total: 3,
+      redisSum: 3,
+      redisMatchesPg: true,
+    });
+    await stores.db.execute(sql`update contestants set active = true where code = 'C3'`);
+  });
+
   it('replaying dead letters does not duplicate them', async () => {
     const batch = asMessages([voteEvent('ZZ9'), 'not json at all']);
     await processBatch(batch, deps());

@@ -1,4 +1,9 @@
-import { Consumer, type Message, stringDeserializers } from '@platformatic/kafka';
+import {
+  Consumer,
+  type Message,
+  type MessagesStream,
+  stringDeserializers,
+} from '@platformatic/kafka';
 import type { Db } from '@tally/db';
 import type { Redis } from 'ioredis';
 import type { Logger } from 'pino';
@@ -53,7 +58,7 @@ export function createVoteConsumer(opts: VoteConsumerOptions) {
   let queue = Promise.resolve();
   let stopping = false;
   let timer: NodeJS.Timeout | undefined;
-  let stream: Awaited<ReturnType<typeof consumer.consume<string, string, string, string>>>;
+  let stream: MessagesStream<string, string, string, string>;
   let loop: Promise<void> | undefined;
 
   async function processWithRetry(batch: VoteMessage[]) {

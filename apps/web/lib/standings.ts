@@ -9,6 +9,8 @@ export interface Entrant {
   accentFrom: string | null;
   accentTo: string | null;
   countryCode: string | null;
+  /** Deactivated contestants stay known to the page (their totals still arrive) but aren't shown. */
+  active: boolean;
 }
 
 /** Live totals as received from the gateway: contestantId → absolute total. */
@@ -42,14 +44,15 @@ export function applyFrame(state: Totals, frame: LiveMessage): Totals {
 const byCode = new Intl.Collator('en', { numeric: true }).compare;
 
 /**
- * Highest total first. Ties break on code in natural order (C2 before C10), so equal rows
- * hold their positions from frame to frame instead of flickering.
+ * Active contestants only, highest total first. Ties break on code in natural order (C2 before
+ * C10), so equal rows hold their positions from frame to frame instead of flickering.
  */
 export function rank(
   entrants: readonly Entrant[],
   totals: ReadonlyMap<string, number>,
 ): Standing[] {
   const sorted = entrants
+    .filter((e) => e.active)
     .map((e) => ({ ...e, total: totals.get(e.id) ?? 0 }))
     .sort((a, b) => b.total - a.total || byCode(a.code, b.code));
 

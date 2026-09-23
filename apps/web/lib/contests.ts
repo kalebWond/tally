@@ -24,6 +24,7 @@ export async function getEntrants(contestId: string): Promise<Entrant[]> {
       accentFrom: c.accentFrom,
       accentTo: c.accentTo,
       countryCode: c.countryCode,
+      active: c.active,
     })
     .from(c)
     .where(eq(c.contestId, contestId))

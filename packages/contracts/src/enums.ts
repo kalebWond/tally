@@ -12,6 +12,11 @@ export const VOTE_SOURCES = ['sms', 'web', 'generator'] as const;
 export const VoteSource = z.enum(VOTE_SOURCES);
 export type VoteSource = z.infer<typeof VoteSource>;
 
-export const DEAD_LETTER_REASONS = ['unknown_code', 'contest_closed', 'malformed'] as const;
+export const DEAD_LETTER_REASONS = [
+  'unknown_code',
+  'inactive_contestant',
+  'contest_closed',
+  'malformed',
+] as const;
 export const DeadLetterReason = z.enum(DEAD_LETTER_REASONS);
 export type DeadLetterReason = z.infer<typeof DeadLetterReason>;

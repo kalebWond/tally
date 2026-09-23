@@ -12,6 +12,7 @@ const entrant = (n: number, code = `C${n}`): Entrant => ({
   accentFrom: null,
   accentTo: null,
   countryCode: null,
+  active: true,
 });
 
 const snapshot = (totals: [number, number][], totalVotes = 0): LiveSnapshot => ({
@@ -99,6 +100,21 @@ describe('rank', () => {
     expect(rows.map((r) => r.rank)).toEqual([1, 2, 2, 4]);
   });
 
+  it('leaves out deactivated contestants and ranks the rest without gaps', () => {
+    const rows = rank(
+      [entrant(1), { ...entrant(2), active: false }, entrant(3)],
+      new Map([
+        [id(1), 5],
+        [id(2), 9],
+        [id(3), 7],
+      ]),
+    );
+    expect(rows.map((r) => [r.code, r.rank])).toEqual([
+      ['C3', 1],
+      ['C1', 2],
+    ]);
+  });
+
   it('shows contestants with no votes yet at zero', () => {
     const [row] = rank([entrant(1)], new Map());
     expect(row).toMatchObject({ code: 'C1', total: 0, rank: 1 });
@@ -112,6 +128,10 @@ describe('unknownIds', () => {
       [id(99), 1],
     ]);
     expect(unknownIds([entrant(1)], totals)).toEqual([id(99)]);
+  });
+
+  it('does not treat a deactivated contestant as unknown, so its totals never trigger a refresh', () => {
+    expect(unknownIds([{ ...entrant(1), active: false }], new Map([[id(1), 3]]))).toEqual([]);
   });
 });
 

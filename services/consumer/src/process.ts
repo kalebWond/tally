@@ -80,14 +80,15 @@ export async function processBatch(messages: InboundMessage[], deps: Deps): Prom
     }
     seen.add(parsed.idempotency_key);
 
-    const contestantId = await deps.resolver.resolve(parsed.contest_id, parsed.code);
-    if (!contestantId) {
-      dead.push(deadLetter(parsed, 'unknown_code', parsed.idempotency_key));
+    const resolved = await deps.resolver.resolve(parsed.contest_id, parsed.code);
+    if (resolved.kind !== 'counted') {
+      const reason = resolved.kind === 'unknown' ? 'unknown_code' : 'inactive_contestant';
+      dead.push(deadLetter(parsed, reason, parsed.idempotency_key));
       continue;
     }
     votes.push({
       contestId: parsed.contest_id,
-      contestantId,
+      contestantId: resolved.contestantId,
       codeSubmitted: parsed.code,
       voterHash: parsed.voter_hash,
       source: parsed.source,

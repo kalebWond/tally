@@ -1,0 +1,1 @@
+ALTER TYPE "public"."dead_letter_reason" ADD VALUE 'inactive_contestant' BEFORE 'contest_closed';

@@ -19,4 +19,6 @@ export function proxy(request: NextRequest) {
   return NextResponse.redirect(login);
 }
 
-export const config = { matcher: ['/control/:path*', '/api/generator/:path*'] };
+export const config = {
+  matcher: ['/control/:path*', '/admin/:path*', '/api/generator/:path*', '/api/contestants/:path*'],
+};

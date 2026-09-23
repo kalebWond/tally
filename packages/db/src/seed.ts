@@ -1,3 +1,4 @@
+import { avatarUrl } from '@tally/contracts';
 import type { Db } from './client.ts';
 import { contestants, contests } from './schema.ts';
 
@@ -5,8 +6,6 @@ import { contestants, contests } from './schema.ts';
 export const SEED_CONTEST_ID = '0192f3a0-7c1e-7000-8000-00000000c0de';
 
 // Fictional people only. Avatars are generated illustrations, seeded by name.
-const avatar = (name: string) =>
-  `https://api.dicebear.com/10.x/notionists/svg?seed=${encodeURIComponent(name)}`;
 
 const roster = [
   { name: 'Mira Kestrel', countryCode: 'NO', accentFrom: '#0EA5E9', accentTo: '#6366F1' },
@@ -38,7 +37,7 @@ export async function seed(db: Db) {
         ...c,
         contestId: SEED_CONTEST_ID,
         code: `C${i + 1}`,
-        imageUrl: avatar(c.name),
+        imageUrl: avatarUrl(c.name),
       })),
     )
     .onConflictDoNothing();

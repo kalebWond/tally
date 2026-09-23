@@ -149,6 +149,8 @@ Build one feature per session. Each has a goal, a build list, and a check that d
 
 *Changed (F13):* the shared-password middleware already exists (`proxy.ts`, `lib/auth.ts`); F14 adds its routes to the matcher and calls `requireAdmin` / `isAdmin`.
 
+*Decided (F14):* codes fixed after creation; deactivation (no delete) dead-letters later votes as `inactive_contestant`; the consumer re-checks codes every 5 s; an open results page picks up a new contestant without a reload. Verified in headless Chrome (20/20): a new code counts its first vote 168 ms after save (5.2 s worst case, after a cached miss).
+
 **Done when:** A contestant added through the UI can immediately receive votes, and a duplicate code is rejected with a clear error.
 
 ---

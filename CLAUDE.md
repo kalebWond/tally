@@ -121,11 +121,11 @@ A feature is done when its check in `IMPLEMENTATION_PLAN.md` passes, tests cover
 
 Update this section as you go.
 
-**Last completed:** F13, generator control panel (2026-09-23)
-**Next up:** F14, admin: contestants. The password gate exists: add the admin paths to the `proxy.ts` matcher, and call `requireAdmin(path)` in pages and `isAdmin()` in route handlers. shadcn/ui is set up (`components/ui`, add more with `pnpm dlx shadcn@latest add <name>` in `apps/web`).
+**Last completed:** F14, admin: contestants (2026-09-23)
+**Next up:** F15, admin: dead letters (`GET /api/dead-letters`, paginated, reason filter). Admin pattern: page under `app/admin/`, call `requireAdmin(path)`; route handlers use `lib/api.ts` (`readAdminJson`, `readParam`, `isAdmin`); add the API path to the `proxy.ts` matcher and a link in `components/admin/admin-nav.tsx`. Reasons now include `inactive_contestant`. shadcn: `pnpm dlx shadcn@latest add <name>` in `apps/web` (answer "no" to overwriting `button.tsx`).
 
 **Seed contest:** `0192f3a0-7c1e-7000-8000-00000000c0de`, codes `C1`–`C10`.
 
-**Operator pages:** `/control` (generator panel), behind `ADMIN_PASSWORD` from `.env`.
+**Operator pages:** `/control` (generator panel) and `/admin/contestants`, behind `ADMIN_PASSWORD` from `.env`. Contestant codes are fixed once created; deactivate instead of deleting.
 
 **Known gaps:** Go isn't installed on the dev machine; `scripts/go.sh` runs it in a container.
