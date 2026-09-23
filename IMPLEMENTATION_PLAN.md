@@ -95,6 +95,8 @@ Build one feature per session. Each has a goal, a build list, and a check that d
 
 **Build:** A counter hook that springs toward a target value. On each update, retarget the running animation rather than starting a new one.
 
+*Decided (F9):* Motion `useSpring` (react-countup dropped), overdamped spring (stiffness 140, damping 26), instant first paint. Verified by per-frame sampling in headless Chrome at 250 ms updates.
+
 **Done when:** With updates arriving every 250ms, counters climb smoothly with no visible stutter or jumping.
 
 ---

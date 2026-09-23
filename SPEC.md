@@ -247,7 +247,7 @@ Verified with k6 against the ingest API; results published in the README.
 
 ## 9. Frontend Specification
 
-**Stack:** Next.js, TypeScript, Tailwind, shadcn/ui, Motion, react-countup, Recharts.
+**Stack:** Next.js, TypeScript, Tailwind, shadcn/ui, Motion, react-countup, Recharts. *Changed (F9): react-countup dropped; Motion drives counters.*
 
 **Ranked list (v1)**
 - Rows sorted by vote count, reordering with layout animation as positions change
@@ -256,6 +256,8 @@ Verified with k6 against the ingest API; results published in the README.
 - Connection state indicator; graceful reconnect with a fresh snapshot
 
 **Critical detail:** the gateway pushes far more often than an animation takes to finish. Each incoming total must be treated as a **new target the animation springs toward**, not a new animation to start. Otherwise counters stutter under load.
+
+*Changed (F9):* implemented with Motion's `useSpring` (retarget keeps velocity); react-countup is not used. The spring is overdamped so counts never overshoot or run backwards, and the first snapshot shows instantly.
 
 **Card grid (later phase)**
 Portrait, name, optional flag, live count, gradient from the contestant's two accent colours. Same data and component as the list; a layout flag switches arrangement.

@@ -1,6 +1,7 @@
 import Image from 'next/image';
 import type { CSSProperties } from 'react';
 import type { Standing } from '@/lib/standings';
+import { AnimatedNumber } from './animated-number';
 
 const DEFAULT_FROM = '#4B5563';
 const DEFAULT_TO = '#1F2937';
@@ -53,9 +54,15 @@ export function ContestantRow({ standing, leader, synced }: Props) {
           {standing.countryCode && <span className="row-country">{standing.countryCode}</span>}
         </span>
       </span>
-      <span className="row-total" data-testid={`total-${standing.code}`}>
-        {synced ? standing.total.toLocaleString('en') : '–'}
-      </span>
+      {synced ? (
+        <AnimatedNumber
+          className="row-total"
+          value={standing.total}
+          data-testid={`total-${standing.code}`}
+        />
+      ) : (
+        <span className="row-total">–</span>
+      )}
     </li>
   );
 }

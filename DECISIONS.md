@@ -20,6 +20,7 @@ Where the build departs from `SPEC.md` or `IMPLEMENTATION_PLAN.md`, or pins down
 | F1 done-when (plan F1, CLAUDE.md) | `docker compose up` brings everything up | `docker compose up` = infra only; `docker compose --profile app up` = full stack. CLAUDE.md's definition of done updated | F1 |
 | Commits (plan working rules, CLAUDE.md) | commit at each feature boundary, feature number in the message | the user commits, using the project skill `/feature-commit`: `F<n>: subject` plus a what/why body. One exception in history: F3 went in as `a977aca feat(ingest): …`, written with the device-level conventional `commit-msg` skill | F3 |
 | Layout (CLAUDE.md) | no package for the database | new `packages/db` (Drizzle schema, client, migrate, seed). Migrations in `infra/migrations`. CLAUDE.md layout updated | F2 |
+| Frontend stack (CLAUDE.md, SPEC §9) | Motion **and** react-countup | Motion only: counters retarget a `useSpring`; react-countup dropped because its updates restart the animation (the stutter CLAUDE.md warns about) | F9 |
 | Redis sync (SPEC §5 keys, plan F5) | "increment the Redis counter"; `tally:idem:{key}` string, 1 h TTL, as a redelivery guard | Redis is **set** to absolute totals read back from Postgres (upward only, via Lua). No `tally:idem:*` keys: Postgres's unique `idempotency_key` is the only dedupe | F5 |
 | Unresolvable votes (plan F6, SPEC §5 `contestant_id` null = unresolved) | dead-lettering is F6; unresolved votes could sit in `votes` with a null contestant | F5 writes them to `dead_letters` (`unknown_code` / `malformed`); `votes.contestant_id` is never null in practice. F6 adds publishing to `votes.dead` | F5 |
 | `dead_letters` columns (SPEC §5) | id, raw payload, reason, received_at | plus a unique, nullable `idempotency_key` (the vote's key, or `offset:topic/partition/offset`) so replays don't duplicate dead letters | F5 |
@@ -53,6 +54,7 @@ Where the build departs from `SPEC.md` or `IMPLEMENTATION_PLAN.md`, or pins down
 | Web runtime config | `GATEWAY_PUBLIC_URL` (the gateway as the browser sees it) read per request and passed from the server component; no `NEXT_PUBLIC_*`, so images aren't tied to one host | F8 |
 | Ranking | total desc, ties by code in natural order, competition ranks (1, 2, 2, 4) | F8 |
 | shadcn/ui timing (stack lists it) | deferred to F13/F14, where forms need it; the results list is custom | F8 |
+| Counter behaviour | first snapshot shows instantly (no count-up on load); later totals spring, overdamped so a count never overshoots or goes backwards; reduced motion jumps | F9 |
 
 ### Outstanding: a rule not met yet
 
@@ -280,3 +282,32 @@ Where the build departs from `SPEC.md` or `IMPLEMENTATION_PLAN.md`, or pins down
 **Decided:** the shared packages import each other with real `.ts` extensions, with `allowImportingTsExtensions` in the base tsconfig (we never emit with `tsc`). Services keep `.js` specifiers, since Next doesn't compile them.
 **Alternatives:** `next build --webpack` plus `extensionAlias` (gives up Turbopack); a build step for the packages (rejected in F1).
 **Also found:** (1) `pgEnum` needs non-empty tuple types that `ZodEnum.options` doesn't provide under the web tsconfig, so contracts now exports `CONTEST_STATUSES` and friends as `as const` tuples and both Zod and Postgres enums are built from them (drizzle-kit confirms no schema change). (2) `migrate.ts` computed its default path from `import.meta.dirname` at import time, which is undefined in Next's server bundle; it's now computed on call.
+
+## F9 — Counters retarget a Motion spring; react-countup is dropped
+
+**Decided:** `AnimatedNumber` wraps Motion's `useSpring`. Each new total calls `spring.set(value)`, which retargets the running spring and keeps its current velocity. The text renders through a `MotionValue`, so animation frames update the DOM without React re-renders. It mounts at the first value (no count-up on load), and `prefers-reduced-motion` jumps instead of animating. Row totals and the header count both use it.
+**Alternatives:** react-countup (listed in the stack). Its `update(newEnd)` starts a new eased run with velocity reset: the restart-per-update pattern CLAUDE.md warns about.
+**Why:** retargeting is what keeps updates that arrive faster than the animation settles reading as one continuous climb. F10 uses Motion for layout animation anyway, so dropping react-countup removes a dependency rather than adding one.
+
+## F9 — The spring must never overshoot
+
+**Decided:** `COUNTER_SPRING = { stiffness: 140, damping: 26, mass: 1 }`, slightly overdamped (ratio ≈ 1.1). It settles in about 0.4 s, which keeps up with 250 ms updates.
+**Why:** an underdamped spring shows more votes than exist, then counts backwards, which reads as votes being removed. A unit test runs Motion's own `spring` generator with velocity carried across retargets every 250 ms, sampled per frame and rounded like the UI, and asserts the value never decreases and never passes its target. Mutation check: `damping: 8` fails both.
+
+## F9 — How "no stutter or jumping" was measured
+
+Headless Chrome sampled the header counter's displayed value and its target on every animation frame while ~180 votes/s went through ingest (a new target on every 250 ms gateway poll), about 10 s per run:
+
+| | Real (retarget) | Control: restart per update | Control: jump per update |
+|---|---|---|---|
+| Frames counting backwards / above target | 0 / 0 | 0 / 0 | 0 / 0 |
+| Largest single-frame step | 5–6 | 6 | 60 |
+| Average step while moving | ~3 | 3.1 | 45 |
+| Stall ratio (speed 3 frames after a new target ÷ 3 before) | 0.83–1.0 median | 0.63 | n/a |
+| Updates that caused a stall (ratio < 0.35) | 0 | 2 | n/a |
+
+Production build: 60 fps, 40 retargets, 0 stalls, and it settled exactly on the final total. **Honest caveat:** the restart control is only modestly worse, because a spring this stiff recovers speed within a couple of frames, so this metric separates retarget from restart weakly. The jump detector separates clearly (60 vs 5). The real counter passes both.
+
+## F9 — Found on the way: web dev couldn't start on the host
+
+F8 set the web dev script to `node --env-file-if-exists=../../.env …/next dev`. Next forwards `execArgv` into `NODE_OPTIONS` for its workers, where Node rejects `--env-file-if-exists`, so `next dev` exited immediately. F8's checks ran against the production container, which is why it went unnoticed. **Fix:** `next.config.ts` reads the repo-root `.env` with `util.parseEnv` and fills in only missing variables. Real environment variables win, and containers have no such file, so it's a no-op there. The dev script is plain `next dev --port 3000` again.

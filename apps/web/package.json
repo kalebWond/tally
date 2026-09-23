@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node --env-file-if-exists=../../.env node_modules/next/dist/bin/next dev --port 3000",
+    "dev": "next dev --port 3000",
     "build": "next build",
     "start": "next start --port 3000",
     "typecheck": "next typegen && tsc -p ."
@@ -13,6 +13,7 @@
     "@tally/contracts": "workspace:*",
     "@tally/db": "workspace:*",
     "drizzle-orm": "^0.45.3",
+    "motion": "^13.4.2",
     "next": "^16.3.6",
     "pg": "^8.23.0",
     "react": "^19.3.0",

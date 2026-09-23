@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useRef } from 'react';
 import { type Entrant, rank, unknownIds } from '@/lib/standings';
+import { AnimatedNumber } from './animated-number';
 import { ContestantRow } from './contestant-row';
 import { type ConnectionState, useLiveTotals } from './use-live-totals';
 
@@ -46,9 +47,15 @@ export function LiveStandings({ contest, entrants, gatewayUrl }: Props) {
           <h1>{contest.name}</h1>
         </div>
         <div className="board-count">
-          <span className="board-count-value" data-testid="total-votes">
-            {synced ? totalVotes.toLocaleString('en') : '–'}
-          </span>
+          {synced ? (
+            <AnimatedNumber
+              className="board-count-value"
+              value={totalVotes}
+              data-testid="total-votes"
+            />
+          ) : (
+            <span className="board-count-value">–</span>
+          )}
           <span className="board-count-label">votes</span>
         </div>
       </header>
