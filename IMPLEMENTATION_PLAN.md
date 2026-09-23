@@ -259,6 +259,8 @@ Build one feature per session. Each has a goal, a build list, and a check that d
 
 **Build:** Remotion composition reading final contest data: animated bar race, final standings, winner reveal. Render command producing an MP4.
 
+*Decided (F25):* `tools/recap`, `pnpm recap [contestId]`; data from Postgres (standings plus the vote log in adaptive buckets); bar race with rank hysteresis. Verified on a 6-minute "Tally Finals": 1080p, 32 s MP4 with no manual steps.
+
 **Done when:** A finished contest renders to a watchable video without manual editing.
 
 ---

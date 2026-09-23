@@ -53,6 +53,7 @@ TypeScript everywhere except the load generator, which is Go.
 - `pnpm lint` (Biome), `pnpm typecheck`, `pnpm test` (Vitest), `pnpm check:health`.
 - Analytics: `analytics-consumer` (port 4004, group `tally-analytics`) copies votes.raw and votes.dead into ClickHouse `votes_raw` / `votes_dead`, creating the tables at startup. Rows are as delivered: count votes as `uniqExact(key_hash)`; counted = accepted − rejected (`votes_dead.sent_at` is the vote's minute). Schema changes are new entries in `MIGRATIONS` (`src/schema.ts`), never edits to applied ones. `pnpm bench:clickhouse` benchmarks the per-minute queries. Query it: `curl 'http://localhost:8123/?user=tally&password=tally&database=tally' --data-binary 'SELECT …'`.
 - Metrics: every service serves `GET /metrics` (`@tally/metrics`; the Go generator writes the text format by hand). Prometheus :9090 and Grafana :3001 (anonymous viewer) run in the `app` profile. The dashboard is generated: edit `scripts/grafana-dashboard.py`, run it, commit the JSON. Consumer lag comes from Redpanda's metrics, not the consumers.
+- `pnpm recap [contestId] [--out file.mp4]` renders a contest's recap video (Remotion, `tools/recap`) into `recaps/`; default is the most recently closed contest. `tools/recap` pins zod 4.5.4 for Remotion.
 - `pnpm load <smoke|steady|spike>` runs k6 (in a container, in the compose network) against the running `app` stack, then checks zero loss and reconciliation; the report lands in `load-results/`. It stops the Go generator first.
 - `pnpm reconcile [--repair] [--contest <uuid>] [--json]` recounts from `votes` and checks every derived count (Postgres and Redis); in containers, `docker compose run --rm reconcile …`. It pauses each contest's counting briefly while it runs.
 - Every new service gets its own Dockerfile and a compose entry under the `app` profile when it's created.
@@ -125,10 +126,10 @@ A feature is done when its check in `IMPLEMENTATION_PLAN.md` passes, tests cover
 
 Update this section as you go.
 
-**Last completed:** F24, card grid view (2026-09-24)
-**Next up:** F25, Remotion results recap (a composition reading a finished contest's data; a render command producing an MP4). Outstanding: the k6 spike regression (DECISIONS, F23).
+**Last completed:** F25, Remotion results recap (2026-09-24)
+**Next up:** F26, deployment (see `IMPLEMENTATION_PLAN.md`). Outstanding: the k6 spike regression (DECISIONS, F23); more than one ingest replica is the obvious next step there.
 
-**Seed contest:** `0192f3a0-7c1e-7000-8000-00000000c0de`, codes `C1`–`C10`.
+**Seed contest:** `0192f3a0-7c1e-7000-8000-00000000c0de`, codes `C1`–`C10`. A closed demo contest, "Tally Finals" (F1–F10), exists in the dev database for recaps.
 
 **Operator pages:** `/control` (generator panel), `/admin/contests` (open/close/reopen), `/admin/contestants`, `/admin/dead-letters` and `/admin/analytics` (ClickHouse only), behind `ADMIN_PASSWORD` from `.env`. Contestant codes are fixed once created; deactivate instead of deleting. Checks that close the seed contest must reopen it. Web now talks to Redis for one thing: the contest status in the meta hash. The consumer rebuilds Redis totals and minutes from Postgres every time it starts.
 

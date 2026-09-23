@@ -1,0 +1,30 @@
+{
+  "name": "@tally/recap",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "recap": "tsx --env-file-if-exists=../../.env src/bin/recap.ts",
+    "studio": "remotion studio src/index.ts",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@remotion/bundler": "^4.0.527",
+    "@remotion/cli": "^4.0.527",
+    "@remotion/google-fonts": "^4.0.527",
+    "@remotion/renderer": "^4.0.527",
+    "@tally/contracts": "workspace:*",
+    "@tally/db": "workspace:*",
+    "drizzle-orm": "^0.45.3",
+    "pg": "^8.23.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "remotion": "^4.0.527",
+    "zod": "4.5.4"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}

@@ -9,3 +9,5 @@ tools/generator/bin/
 # Load-test raw output; the markdown reports are committed.
 load-results/*.json
 load-results/*.csv
+# Rendered recap videos (F25): pnpm recap
+recaps/

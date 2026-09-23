@@ -88,6 +88,7 @@ Where the build departs from `SPEC.md` or `IMPLEMENTATION_PLAN.md`, or pins down
 | Analytics page | `/admin/analytics?contest=` (operator, password-protected), data from `GET /api/analytics/:contestId`, ClickHouse only; refreshes every 15 s. Counted = distinct raw keys not in the contest's dead letters | F22 |
 | Metrics | `GET /metrics` (Prometheus text) on ingest, consumer, gateway, analytics-consumer, web and generator; shared `@tally/metrics` (prom-client, `service` label, `tally_` prefix); consumer lag from Redpanda's `public_metrics` (high watermark − committed offset); Prometheus (9090, 5 s scrapes) and Grafana (3001, anonymous viewer, dashboard `tally` provisioned from `infra/grafana`) in the `app` profile | F23 |
 | Card grid | results page `?view=grid` (default list), toggled on the page without a navigation; `ContestantRow` takes `layout: 'list' \| 'grid'`, sets `data-layout`, and keeps an identical element tree, with CSS grid areas arranging it; flag emoji from the country code | F24 |
+| Results recap | `tools/recap` (Remotion 4): `pnpm recap [contestId] [--out file.mp4]`, default the most recently closed contest; 1920×1080 at 30 fps, 32 s (intro 3 s, bar race 16 s, final standings 6 s, winner 7 s); data from Postgres; output in `recaps/` (gitignored); zod pinned to 4.5.4 in this package, Remotion's version | F25 |
 
 ### Outstanding: a rule not met yet
 
@@ -676,4 +677,22 @@ Headless Chrome, generator at 800 votes/s. Before switching, every row and count
 - **Live and animated in the grid:** the total rose 5,785,911 → 5,788,319 in 3 s, and the counter showed 121 distinct values in 121 frames, never backwards.
 - **Overtake in the grid:** in a temporary 4-contestant contest ("F24 Grid Check", left closed), 50 votes took G4 from last to first. Its card moved from (946, 212) to (226, 212) through 25 in-between frames: a glide, not a jump.
 - The check's Chrome runs in its own process group, and the whole group is killed at the end: no stray renderers this time.
+
+## F25 — Recap video: Remotion, fed by Postgres, deterministic bar race
+**Decided:** a Remotion project in `tools/recap`, 1080p at 30 fps, 32 s in four sequences, using the scoreboard's fonts and colours:
+- **Intro (3 s):** the contest name, and the vote count counting up.
+- **Bar race (16 s):** the top ten, accent gradients and avatars, with a clock showing the contest's own time.
+- **Final standings (6 s):** all contestants with vote share and flags, staggered in.
+- **Winner reveal (7 s):** the winner's portrait in an accent ring with a slow glow, name, votes, share, and margin over the runner-up.
+
+`pnpm recap` exports the data from Postgres (`vote_totals` for the standings, the vote log bucketed with `date_bin` for the history), bundles the composition, renders H.264 and prints the file's metadata. By default it picks the most recently closed contest.
+**History buckets:** sized to the contest's span (5 s up to 1 h, about 120 buckets), with empty buckets dropped, so a 6-minute final gets about 70 steps and a contest with hours of silence doesn't produce a stalled race. At most 150 steps, the last always kept, and a zero step prepended, so the race starts from nothing and ends exactly on the final totals. First version used `vote_buckets` minutes: far too coarse for a short contest.
+**Bar race order:** first version sorted each frame by interpolated totals and averaged ranks over 8 frames. Near-ties then flipped every frame and averaged into bars parked between slots, with overlapping labels (visible in extracted stills). Now the rank history is computed once from frame 0, with hysteresis: a bar passes the one above only when ahead by 0.5% and at least 2 votes, and the order is exact once the race holds. Slots are averaged over 10 frames, so each overtake is one decisive glide. It's computed from frame 0 each time, so every frame is reproducible whichever renders first (Remotion renders frames out of order across its workers).
+**Also:** Remotion warned that its zod interop expects zod 4.5.4 (the workspace uses 4.6.5), so `tools/recap` pins 4.5.4. The exporter and composition validate against it; the rest of the repo is unaffected.
+
+## F25 — How "a finished contest renders to a watchable video without manual editing" was verified
+A real finished contest: "Tally Finals" (10 contestants, codes F1–F10), 6 minutes of generator traffic at 800 votes/s with the drifting-race popularity and 2% invalid codes, closed through `POST /api/contests/:id/status`. Result: 285,516 counted, and F8, Juno Takamire, won with 62,413.
+- **The render:** `pnpm recap`, with no arguments, picked it up and rendered `recaps/tally-finals.mp4`: **1920×1080, 32.0 s, 30 fps, H.264** (2 min 18 s the first time, including Remotion's browser download; 49 s after that).
+- **Watchable:** stills extracted with Remotion's ffmpeg at 2, 5, 7, 9, 11, 18, 22 and 29 s were checked by eye. Intro, race, standings and winner all read correctly; the race's last frame matches the final standings exactly; overtakes are single crossings.
+- **Test:** `export.test.ts` covers the data against a throwaway database: the race starts at zero, never goes backwards, ends on the final totals, and turns 3 quiet hours into one step.
 
