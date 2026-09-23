@@ -22,7 +22,7 @@
     "reconcile": "pnpm --filter @tally/consumer reconcile",
     "load": "node scripts/load.mjs",
     "check:health": "scripts/check-health.sh",
-    "test:go": "scripts/go.sh test ./..."
+    "test:go": "scripts/go.sh test -count=1 ./..."
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",

@@ -14,6 +14,7 @@ export const HealthResponse = z.object({
   redpanda: Dependency.optional(),
   postgres: Dependency.optional(),
   redis: Dependency.optional(),
+  clickhouse: Dependency.optional(),
 });
 
 export type HealthResponse = z.infer<typeof HealthResponse>;

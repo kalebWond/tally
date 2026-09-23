@@ -83,6 +83,7 @@ Where the build departs from `SPEC.md` or `IMPLEMENTATION_PLAN.md`, or pins down
 | Which votes a contest counts | exactly those ingest accepted (`sent_at`) while it was open: `opens_at ≤ sent_at` and, once closed, `sent_at < closes_at`. Draft counts nothing. Null `opens_at` = open since creation. Everything else → `contest_closed` | F16 |
 | Reconciliation command | `pnpm reconcile [--repair] [--contest <uuid>] [--json]` on the host; `docker compose run --rm reconcile …` (profile `tools`, consumer image). Checks `vote_totals`, `vote_buckets`, Redis totals, `totalVotes`, minutes and `lastMinute` against a recount of `votes`. Exit 0 = no drift or all repaired, 1 = drift left, 2 = error | F18 |
 | Load test | `pnpm load <smoke\|steady\|spike>`: k6 (`grafana/k6:2.3.0`, `tools/load/votes.js`, open model) in the compose network against `ingest:4000`; steady = ramp to 1,000/s, hold 3 min; spike = 500/s → 3,000/s for 1 min → 500/s. Reports in `load-results/*.md` (raw JSON/CSV gitignored); results published in README | F19 |
+| Analytics pipeline | `services/analytics-consumer` (port 4004), consumer group `tally-analytics`, reads **both** `votes.raw` and `votes.dead` into ClickHouse `votes_raw` / `votes_dead`; ClickHouse 26.9 in the default compose profile (port 8123, user/db `tally`); schema created at startup. `HealthResponse` gained optional `clickhouse` | F20 |
 
 ### Outstanding: a rule not met yet
 
@@ -565,4 +566,19 @@ The second spike run, with k6 on the host network hitting `localhost:4000`, fail
 `pnpm load steady` and `pnpm load spike` (twice) on the containerised stack; reports committed in `load-results/`, table in the README:
 - **Steady:** 1,000 votes/s delivered through the hold; p50/p95/p99 **4.1 / 7.0 / 8.2 ms**; 0 errors; max lag 140; 217,499 accepted = 217,499 counted; no drift.
 - **Spike:** 3,000 votes/s delivered at the peak; p95 **14.4 ms** (second run 20.1 ms, with 32 of 282,499 iterations dropped by k6); 0 errors; max lag about 1,000, drained in 0.2 s; every accepted vote counted; no drift.
+
+## F20 — Analytics consumer: its own group, both topics, rows as delivered
+**Decided:** a new service, `analytics-consumer`, in its own consumer group, `tally-analytics`, so its offsets, pace and outages are its own. It reads `votes.raw` (every vote ingest accepted) *and* `votes.dead` (every rejection, with its reason), so analytics can tell counted votes from rejected ones without asking Postgres, which F22 requires. It works in batches of up to 5,000 messages or 1 s, since ClickHouse prefers large inserts. Offsets are committed only after the insert succeeds, and a failed insert is retried, never skipped: at-least-once, like the totals consumer. A new group starts from the earliest offset, so analytics begins complete: the first start replayed ~2.8M votes in 130 s.
+Rows are stored as delivered: a redelivered batch, or a client retry with the same `Idempotency-Key`, adds rows, and readers count `uniqExact(idempotency_key)`. F21 designs the read side. Unparseable `votes.raw` messages are skipped here, because they reach `votes.dead` as `malformed` anyway. The tables are created with `CREATE TABLE IF NOT EXISTS` at startup: analytics is derived data, and resetting the group's offsets rebuilds it from the topics.
+**Alternatives:** reading only `votes.raw` and resolving codes against Postgres (the analytics path would then depend on Postgres, and its "counted" could disagree with the consumer's contest window and deactivation rules); ReplacingMergeTree to dedupe on write (it dedupes only rows with equal sort keys, and a retry with the same key has a different `sent_at`).
+**Also:** `pnpm test:go` now runs with `-count=1`. Go's test cache didn't notice that `health-response.schema.json`, outside the Go module, had changed, and reported a stale "ok".
+
+## F20 — Replay found three votes Postgres no longer has
+Comparing ClickHouse with Postgres after the replay: dead letters matched reason by reason (16,230 / 113 / 15,999 / 2). ClickHouse had 3 more distinct vote keys than Postgres votes plus vote-shaped dead letters. They were the 3 votes F8's refresh check sent to a temporary contest (`…f8f8f`) that I deleted by hand from the dev database afterwards; the topic still has them. So this is a cleanup artefact, not a pipeline bug. It's also a small demonstration that the topic, not Postgres, is the complete record of what arrived.
+
+## F20 — How "two minutes without analytics leaves live results unaffected, and it catches up" was verified
+Generator at 1,000 votes/s with a results page open; the live path sampled every second for 30 s with analytics running and for 120 s with `docker compose stop analytics-consumer`. 8 of 8 checks passed:
+- **Unaffected:** the page's total moved in 67 of 67 samples. The totals consumer's lag stayed a median of 90 (max 190), the page stayed about 300 votes behind Postgres (400 before), and ingest p95 was 9.1 ms (9.3 before). 184,710 accepted, 0 rejected or failed. Meanwhile the analytics backlog reached 121,154 messages.
+- **Caught up:** 121,494 messages in 12.0 s after restart (about 10,000 msg/s), with live traffic still running.
+- **Complete:** ClickHouse had every vote of the run exactly once by key: **184,710 = Postgres = accepted**.
 

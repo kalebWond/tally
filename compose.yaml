@@ -79,6 +79,25 @@ services:
       timeout: 5s
       retries: 20
 
+  # Analytics store (F20). Default profile, like the other infrastructure.
+  clickhouse:
+    image: clickhouse/clickhouse-server:26.9
+    environment:
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-tally}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-tally}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-tally}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "0"
+    ports: ["8123:8123"]
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+    ulimits:
+      nofile: { soft: 262144, hard: 262144 }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8123/ping | grep -q Ok"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+
   # One-shot: migrate, then seed (idempotent). Consumer and web wait for it to exit 0.
   migrate:
     profiles: [app]
@@ -115,6 +134,23 @@ services:
       migrate: { condition: service_completed_successfully }
     build: { context: ., dockerfile: services/consumer/Dockerfile }
     ports: ["4003:4003"]
+
+  # Second consumer group (F20): votes.raw + votes.dead → ClickHouse. Live results never wait for it.
+  analytics-consumer:
+    <<: *node-service
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      KAFKA_BROKERS: redpanda:9092
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-tally}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-tally}
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-tally}
+    depends_on:
+      redpanda: { condition: service_healthy }
+      clickhouse: { condition: service_healthy }
+      topics: { condition: service_completed_successfully }
+    build: { context: ., dockerfile: services/analytics-consumer/Dockerfile }
+    ports: ["4004:4004"]
 
   # F18, one-shot: docker compose run --rm reconcile [--repair] [--contest <uuid>] [--json]
   # Its own profile, so `up` never runs it. Same image as the consumer.
@@ -158,6 +194,7 @@ services:
       ingest: { condition: service_started }
 
 volumes:
+  clickhouse-data:
   redpanda-data:
   postgres-data:
   redis-data:

@@ -63,6 +63,8 @@ Redpanda (votes.raw) → Analytics consumer → ClickHouse → Analytics page
 
 The analytics consumer runs in a **separate consumer group**, so it reads the same stream independently. If it stalls, live results are unaffected.
 
+*Decided (F20):* it reads `votes.dead` too (into `votes_dead`), so analytics tells counted from rejected votes without Postgres. Rows are stored as delivered (at-least-once); readers count distinct `idempotency_key`s. Port 4004.
+
 ### Design principles
 
 1. **The ingest path stays thin.** Validate shape, hash the sender, publish. No database access on the hot path.

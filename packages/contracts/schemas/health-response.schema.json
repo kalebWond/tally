@@ -32,6 +32,13 @@
         "connected",
         "disconnected"
       ]
+    },
+    "clickhouse": {
+      "type": "string",
+      "enum": [
+        "connected",
+        "disconnected"
+      ]
     }
   },
   "required": [

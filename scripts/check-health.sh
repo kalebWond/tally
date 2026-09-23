@@ -20,12 +20,12 @@ wait_for() {
 }
 
 echo "infrastructure"
-for svc in redpanda postgres redis; do
+for svc in redpanda postgres redis clickhouse; do
   wait_for "$svc" "[ \"\$(docker inspect -f '{{.State.Health.Status}}' \$(docker compose ps -q $svc))\" = healthy ]"
 done
 
 echo "services"
-for target in web:3000 ingest:4000 gateway:4001 generator:4002 consumer:4003; do
+for target in web:3000 ingest:4000 gateway:4001 generator:4002 consumer:4003 analytics-consumer:4004; do
   wait_for "${target%%:*} /health" "curl -fsS http://localhost:${target##*:}/health"
 done
 

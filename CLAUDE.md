@@ -44,13 +44,14 @@ TypeScript everywhere except the load generator, which is Go.
 
 ## Running locally
 
-- `docker compose up -d` starts infrastructure only (Redpanda, Postgres, Redis). Run services on the host with `pnpm dev` (TS) and `go run .` in `tools/generator`. Host services read `.env` (copy from `.env.example`).
+- `docker compose up -d` starts infrastructure only (Redpanda, Postgres, Redis, ClickHouse on 8123, user/db `tally`). Run services on the host with `pnpm dev` (TS) and `go run .` in `tools/generator`. Host services read `.env` (copy from `.env.example`).
 - `docker compose --profile app up -d --build` runs the full stack in containers. Use it for demos, recordings, and checking the Dockerfiles.
 - Redpanda: containers use `redpanda:9092`, the host uses `localhost:19092`. A one-shot `topics` job creates `votes.raw` and `votes.dead` (6 partitions each) on every `docker compose up`. Inspect with `docker compose exec redpanda rpk topic consume votes.raw -o start`.
 - `pnpm db:migrate` / `pnpm db:seed` on the host (both idempotent). After a schema change, run `pnpm db:generate` and commit the SQL in `infra/migrations`. The `app` profile runs a one-shot `migrate` job (migrate + seed) before consumer and web.
 - `packages/*` import each other with `.ts` extensions (Turbopack can't map `.js` → `.ts`); services use `.js`. A bundled workspace package's runtime deps must also be the app's deps.
 - Go (generator): `pnpm test:go` / `scripts/go.sh <go args>` use host Go if installed, otherwise the `golang:1.27-alpine` image. After changing a contract the generator speaks, run `pnpm --filter @tally/contracts export-schemas`.
 - `pnpm lint` (Biome), `pnpm typecheck`, `pnpm test` (Vitest), `pnpm check:health`.
+- Analytics: `analytics-consumer` (port 4004, group `tally-analytics`) copies votes.raw and votes.dead into ClickHouse `votes_raw` / `votes_dead`, creating the tables at startup. Rows are as delivered: count `uniqExact(idempotency_key)`. Query it: `curl 'http://localhost:8123/?user=tally&password=tally&database=tally' --data-binary 'SELECT …'`.
 - `pnpm load <smoke|steady|spike>` runs k6 (in a container, in the compose network) against the running `app` stack, then checks zero loss and reconciliation; the report lands in `load-results/`. It stops the Go generator first.
 - `pnpm reconcile [--repair] [--contest <uuid>] [--json]` recounts from `votes` and checks every derived count (Postgres and Redis); in containers, `docker compose run --rm reconcile …`. It pauses each contest's counting briefly while it runs.
 - Every new service gets its own Dockerfile and a compose entry under the `app` profile when it's created.
@@ -123,8 +124,8 @@ A feature is done when its check in `IMPLEMENTATION_PLAN.md` passes, tests cover
 
 Update this section as you go.
 
-**Last completed:** F19, load testing with k6 (2026-09-24)
-**Next up:** F20, analytics consumer (see `IMPLEMENTATION_PLAN.md`; ClickHouse arrives with F20–F22).
+**Last completed:** F20, analytics consumer (2026-09-24)
+**Next up:** F21, ClickHouse schema: prove the `votes_raw` ordering key (and any per-minute rollup) on several million rows; decide how readers dedupe by `idempotency_key` cheaply.
 
 **Seed contest:** `0192f3a0-7c1e-7000-8000-00000000c0de`, codes `C1`–`C10`.
 

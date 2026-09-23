@@ -209,6 +209,8 @@ Build one feature per session. Each has a goal, a build list, and a check that d
 
 **Build:** Second consumer group. Batched inserts into ClickHouse. Independent offset tracking.
 
+*Decided (F20):* `services/analytics-consumer`, group `tally-analytics`, reads votes.raw and votes.dead; ClickHouse 26.9 in compose. Verified: 2 min stopped at 1,000 votes/s changed nothing live; 121k backlog caught up in 12 s; ClickHouse = Postgres = accepted (184,710).
+
 **Done when:** Stopping the analytics consumer for two minutes leaves live results completely unaffected, and it catches up on restart.
 
 ---

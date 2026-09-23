@@ -134,6 +134,34 @@ importers:
         specifier: ^7.0.2
         version: 7.0.2
 
+  services/analytics-consumer:
+    dependencies:
+      '@clickhouse/client':
+        specifier: ^1.23.1
+        version: 1.23.1
+      '@platformatic/kafka':
+        specifier: ^2.12.0
+        version: 2.12.0
+      '@tally/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
+      pino:
+        specifier: ^10.3.1
+        version: 10.3.1
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
+    devDependencies:
+      tsup:
+        specifier: ^8.5.1
+        version: 8.5.1(jiti@2.7.0)(postcss@8.5.28)(tsx@4.23.15)(typescript@7.0.2)
+      tsx:
+        specifier: ^4.23.15
+        version: 4.23.15
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+
   services/consumer:
     dependencies:
       '@platformatic/kafka':
@@ -419,6 +447,10 @@ packages:
     engines: {node: '>=14.21.3'}
     cpu: [x64]
     os: [win32]
+
+  '@clickhouse/client@1.23.1':
+    resolution: {integrity: sha512-vs3/Zc1dHvT171btW5nMoPsPCJ6QVJ5pp7obxzO5sjqwFx/jjz9wwCAqcFOdc2DhprugDBaVn+4dVY8hG3A9nw==}
+    engines: {node: '>=20'}
 
   '@dotenvx/dotenvx@1.75.1':
     resolution: {integrity: sha512-/BITOC9dmS/edY2zQwZNicQ059O6RKabtQfyEafV0nGtfYRNHYy1DIPiYVcov40+tob9hfmBnbR963dS+EQ1DQ==}
@@ -5046,6 +5078,8 @@ snapshots:
 
   '@biomejs/cli-win32-x64@2.5.14':
     optional: true
+
+  '@clickhouse/client@1.23.1': {}
 
   '@dotenvx/dotenvx@1.75.1':
     dependencies:
