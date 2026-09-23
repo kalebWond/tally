@@ -19,7 +19,7 @@ if (existsSync(dotenv)) {
 const config: NextConfig = {
   output: 'standalone',
   outputFileTracingRoot: root,
-  transpilePackages: ['@tally/contracts'],
+  transpilePackages: ['@tally/contracts', '@tally/metrics'],
 };
 
 export default config;

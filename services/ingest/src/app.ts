@@ -8,6 +8,7 @@ import {
   type VoteEvent,
   VoteRequest,
 } from '@tally/contracts';
+import { createMetrics, LATENCY_BUCKETS } from '@tally/metrics';
 import Fastify, { type FastifyError } from 'fastify';
 import type { z } from 'zod';
 import type { Config } from './config.js';
@@ -43,6 +44,39 @@ export function buildApp({ config, publisher, isReady, logStream }: Deps) {
       ...(logStream && { stream: logStream }),
     },
   });
+  // Prometheus (F23). Latency is measured from Fastify's request start to the response, so it
+  // includes the wait for acks=all: the number a voter's phone would see.
+  const metrics = createMetrics('ingest');
+  const requests = metrics.counter(
+    'tally_ingest_requests_total',
+    'HTTP requests by route and status',
+    ['route', 'status'],
+  );
+  const duration = metrics.histogram(
+    'tally_ingest_request_duration_seconds',
+    'HTTP request duration',
+    LATENCY_BUCKETS,
+    ['route'],
+  );
+  const accepted = metrics.counter(
+    'tally_ingest_votes_accepted_total',
+    'Votes accepted (202): on the topic, acks=all',
+  );
+  const publishSeconds = metrics.histogram(
+    'tally_ingest_publish_duration_seconds',
+    'Time for Redpanda to acknowledge a vote',
+    LATENCY_BUCKETS,
+  );
+  app.addHook('onResponse', async (req, reply) => {
+    const route = req.routeOptions.url ?? 'unmatched';
+    if (route === '/metrics') return;
+    requests.inc({ route, status: String(reply.statusCode) });
+    duration.observe({ route }, reply.elapsedTime / 1000);
+  });
+  app.get('/metrics', async (_req, reply) =>
+    reply.type(metrics.contentType).send(await metrics.render()),
+  );
+
   // JSON only: anything else is a clear 415 rather than a confusing schema error.
   app.removeContentTypeParser('text/plain');
 
@@ -106,14 +140,17 @@ export function buildApp({ config, publisher, isReady, logStream }: Deps) {
       idempotency_key: key?.data ?? randomUUID(),
     };
 
+    const stopPublishTimer = publishSeconds.startTimer();
     try {
       await publisher.publish(event);
+      stopPublishTimer();
     } catch (err) {
       // Never a silent 202: the client gets a retryable failure and keeps the vote.
       req.log.error({ err, eventId: event.event_id }, 'publish failed');
       return reply.code(503).send(reject('unavailable', 'vote not accepted, retry later'));
     }
 
+    accepted.inc();
     return reply.code(202).send({
       eventId: event.event_id,
       idempotencyKey: event.idempotency_key,

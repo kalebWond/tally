@@ -10,6 +10,7 @@ import {
   MINUTES_WINDOW,
   redisKeys,
 } from '@tally/contracts';
+import { createMetrics, LATENCY_BUCKETS } from '@tally/metrics';
 import type { Redis } from 'ioredis';
 import type { Logger } from 'pino';
 import { type WebSocket, WebSocketServer } from 'ws';
@@ -55,6 +56,21 @@ export function createGateway({
   heartbeatFrameMs = HEARTBEAT_MS,
 }: GatewayOptions) {
   const rooms = new Map<string, Room>();
+
+  // Prometheus (F23): who is watching, what they're sent, and how long each Redis poll takes.
+  const metrics = createMetrics('gateway');
+  const frames = metrics.counter('tally_gateway_frames_total', 'Frames sent to clients, by type', [
+    'type',
+  ]);
+  const pollSeconds = metrics.histogram(
+    'tally_gateway_poll_duration_seconds',
+    'Redis read per room per poll',
+    LATENCY_BUCKETS,
+  );
+  metrics.gauge('tally_gateway_rooms', 'Contests with at least one viewer', () => rooms.size);
+  metrics.gauge('tally_gateway_clients', 'Connected viewers', () =>
+    [...rooms.values()].reduce((n, room) => n + room.clients.size, 0),
+  );
   const alive = new WeakMap<WebSocket, boolean>();
 
   async function read(contestId: string) {
@@ -93,14 +109,20 @@ export function createGateway({
 
   function broadcast(room: Room, message: LiveUpdate) {
     const data = JSON.stringify(message);
-    for (const ws of room.clients) if (ws.readyState === ws.OPEN) ws.send(data);
+    for (const ws of room.clients) {
+      if (ws.readyState !== ws.OPEN) continue;
+      ws.send(data);
+      frames.inc({ type: 'update' });
+    }
   }
 
   function schedulePoll(room: Room) {
     room.timer = setTimeout(async () => {
       if (room.closed) return;
       try {
+        const stopPoll = pollSeconds.startTimer();
         const next = await read(room.contestId);
+        stopPoll();
         if (room.closed) return;
         const changed = diffTotals(room.last, next.totals);
         const totalsMoved = next.totalVotes !== room.totalVotes;
@@ -194,6 +216,7 @@ export function createGateway({
       ts: Date.now(),
     };
     ws.send(JSON.stringify(snapshot));
+    frames.inc({ type: 'snapshot' });
     room.clients.add(ws);
     ws.on('close', () => {
       room.clients.delete(ws);
@@ -219,6 +242,10 @@ export function createGateway({
       res
         .writeHead(ok ? 200 : 503, { 'content-type': 'application/json' })
         .end(JSON.stringify(body));
+      return;
+    }
+    if (req.method === 'GET' && path === '/metrics') {
+      res.writeHead(200, { 'content-type': metrics.contentType }).end(await metrics.render());
       return;
     }
     if (req.method === 'GET' && path === '/debug') {
@@ -265,7 +292,11 @@ export function createGateway({
     const frame: LiveHeartbeat = { type: 'heartbeat', ts: Date.now() };
     const data = JSON.stringify(frame);
     for (const room of rooms.values()) {
-      for (const ws of room.clients) if (ws.readyState === ws.OPEN) ws.send(data);
+      for (const ws of room.clients) {
+        if (ws.readyState !== ws.OPEN) continue;
+        ws.send(data);
+        frames.inc({ type: 'heartbeat' });
+      }
     }
   }, heartbeatFrameMs);
 

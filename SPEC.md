@@ -34,7 +34,7 @@ Portfolio project modelled on a production SMS voting system built for a live te
 | Everything else | TypeScript |
 | Queue | Redpanda (Kafka API compatible) |
 | Analytics store | ClickHouse — later phase |
-| Metrics stack | Prometheus + Grafana — later phase, metrics exposed from day one |
+| Metrics stack | Prometheus + Grafana — later phase, metrics exposed from day one. *Decided (F23): every service serves `/metrics`; Prometheus :9090, Grafana :3001; consumer lag from Redpanda's metrics* |
 | Deployment | Local Docker Compose first; host chosen later |
 | Kubernetes | Optional final phase, additive only |
 

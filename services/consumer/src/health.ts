@@ -1,5 +1,6 @@
 import { createServer } from 'node:http';
 import type { HealthResponse } from '@tally/contracts';
+import type { Metrics } from '@tally/metrics';
 
 type Dependency = 'connected' | 'disconnected';
 export type DependencyChecks = () => Promise<{
@@ -8,9 +9,15 @@ export type DependencyChecks = () => Promise<{
   redis: Dependency;
 }>;
 
-/** 200 when every dependency answers, 503 `degraded` otherwise. */
-export function createHealthServer(check: DependencyChecks) {
+/** 200 when every dependency answers, 503 `degraded` otherwise; `/metrics` for Prometheus. */
+export function createHealthServer(check: DependencyChecks, metrics?: Metrics) {
   return createServer((req, res) => {
+    if (metrics && req.method === 'GET' && req.url === '/metrics') {
+      void metrics
+        .render()
+        .then((body) => res.writeHead(200, { 'content-type': metrics.contentType }).end(body));
+      return;
+    }
     if (req.method !== 'GET' || req.url !== '/health') {
       res.writeHead(404).end();
       return;

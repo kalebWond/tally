@@ -1,0 +1,20 @@
+# F23: every Tally service, plus Redpanda (consumer lag = high watermark − committed offset).
+# 5 s scrapes: a burst lasting tens of seconds should read as a shape, not a single dot.
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: tally
+    static_configs:
+      - targets:
+          - ingest:4000
+          - gateway:4001
+          - generator:4002
+          - consumer:4003
+          - analytics-consumer:4004
+          - web:3000
+  - job_name: redpanda
+    metrics_path: /public_metrics
+    static_configs:
+      - targets: [redpanda:9644]

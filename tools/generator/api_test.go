@@ -95,3 +95,23 @@ func TestStopAndStatus(t *testing.T) {
 		t.Fatalf("status: %v %v", err, res)
 	}
 }
+
+func TestMetricsExposeTheRunInPrometheusFormat(t *testing.T) {
+	srv := apiServer(t)
+	post(t, srv, "/start", validStart)
+	res, err := http.Get(srv.URL + "/metrics")
+	if err != nil || res.StatusCode != http.StatusOK {
+		t.Fatalf("metrics: %v %v", err, res)
+	}
+	body, _ := io.ReadAll(res.Body)
+	for _, want := range []string{
+		"# TYPE tally_generator_sent_total counter",
+		`tally_generator_running{service="generator"} 1`,
+		`tally_generator_target_rate{service="generator"} `,
+	} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("metrics missing %q:\n%s", want, body)
+		}
+	}
+}
+

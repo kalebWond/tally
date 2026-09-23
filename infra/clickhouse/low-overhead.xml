@@ -1,0 +1,15 @@
+<!-- F23: ClickHouse writes its own diagnostic logs several times a second and merges them in the
+     background, which cost ~1.6 cores at idle on the dev laptop (the same cores ingest and the
+     consumer need). Tally reads none of these; query_log (benchmarks) and part_log stay. -->
+<clickhouse>
+    <metric_log remove="1"/>
+    <asynchronous_metric_log remove="1"/>
+    <trace_log remove="1"/>
+    <text_log remove="1"/>
+    <query_thread_log remove="1"/>
+    <query_views_log remove="1"/>
+    <latency_log remove="1"/>
+    <error_log remove="1"/>
+    <processors_profile_log remove="1"/>
+    <opentelemetry_span_log remove="1"/>
+</clickhouse>

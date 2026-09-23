@@ -53,6 +53,8 @@ services:
 
   postgres:
     image: postgres:18.6-alpine
+    # F23: the votes table's unique index outgrew the 128 MB default (316 MB at 4M votes).
+    command: ["postgres", "-c", "shared_buffers=512MB"]
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-tally}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tally}
@@ -90,6 +92,7 @@ services:
     ports: ["8123:8123"]
     volumes:
       - clickhouse-data:/var/lib/clickhouse
+      - ./infra/clickhouse/low-overhead.xml:/etc/clickhouse-server/config.d/low-overhead.xml:ro
     ulimits:
       nofile: { soft: 262144, hard: 262144 }
     healthcheck:
@@ -152,6 +155,41 @@ services:
     build: { context: ., dockerfile: services/analytics-consumer/Dockerfile }
     ports: ["4004:4004"]
 
+  # Metrics (F23): Prometheus scrapes every service's /metrics and Redpanda every 5 s.
+  prometheus:
+    image: prom/prometheus:v3.14.0
+    profiles: [app]
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=7d
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports: ["9090:9090"]
+
+  # Dashboards (F23), provisioned from infra/grafana. Anonymous viewers see the Tally dashboard;
+  # editing needs GRAFANA_ADMIN_PASSWORD.
+  grafana:
+    image: grafana/grafana:13.2.2
+    profiles: [app]
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/tally.json
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+    volumes:
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    ports: ["3001:3000"]
+
   # F18, one-shot: docker compose run --rm reconcile [--repair] [--contest <uuid>] [--json]
   # Its own profile, so `up` never runs it. Same image as the consumer.
   reconcile:
@@ -199,6 +237,8 @@ services:
 
 volumes:
   clickhouse-data:
+  grafana-data:
+  prometheus-data:
   redpanda-data:
   postgres-data:
   redis-data:

@@ -5,6 +5,7 @@ import {
   stringDeserializers,
 } from '@platformatic/kafka';
 import type { Db } from '@tally/db';
+import { createMetrics, type Metrics } from '@tally/metrics';
 import type { Redis } from 'ioredis';
 import type { Logger } from 'pino';
 import { createDeadLetterPublisher } from './dead-letter-publisher.js';
@@ -21,6 +22,8 @@ interface VoteConsumerOptions {
   db: Db;
   redis: Redis;
   log: Logger;
+  /** Defaults to a fresh registry (tests); the service passes the one it serves. */
+  metrics?: Metrics;
   /** Process as soon as this many messages are buffered… */
   maxBatch?: number;
   /** …or this long after the last flush, whichever comes first. */
@@ -53,7 +56,25 @@ export function createVoteConsumer(opts: VoteConsumerOptions) {
     deadLetters,
   };
 
+  const metrics = opts.metrics ?? createMetrics('consumer');
   const stats = { processed: 0, counted: 0, duplicates: 0, dead: 0, batches: 0 };
+  const messages = metrics.counter('tally_consumer_messages_total', 'Votes processed, by outcome', [
+    'outcome',
+  ]);
+  const batchSeconds = metrics.histogram(
+    'tally_consumer_batch_duration_seconds',
+    'One batch: Postgres transaction, dead-letter publish and Redis update',
+    [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
+  );
+  const batchSize = metrics.histogram(
+    'tally_consumer_batch_size',
+    'Messages per batch',
+    [1, 10, 50, 100, 250, 500],
+  );
+  const failures = metrics.counter(
+    'tally_consumer_batch_failures_total',
+    'Batches that failed and were retried',
+  );
   let buffer: VoteMessage[] = [];
   let queue = Promise.resolve();
   let stopping = false;
@@ -72,6 +93,7 @@ export function createVoteConsumer(opts: VoteConsumerOptions) {
       try {
         return await processBatch(inbound, deps);
       } catch (err) {
+        failures.inc();
         // Postgres, Redis or the broker unavailable: hold position and retry. Moving on would let a later
         // commit skip these votes.
         log.error({ err, attempt, size: batch.length }, 'batch failed, retrying');
@@ -107,8 +129,14 @@ export function createVoteConsumer(opts: VoteConsumerOptions) {
       if (buffer.length === 0) return;
       const batch = buffer;
       buffer = [];
+      const stopTimer = batchSeconds.startTimer();
       const result = await processWithRetry(batch);
       if (!result) return; // stopping mid-retry: leave uncommitted for redelivery
+      stopTimer();
+      batchSize.observe(batch.length);
+      messages.inc({ outcome: 'counted' }, result.counted);
+      messages.inc({ outcome: 'duplicate' }, result.duplicates);
+      messages.inc({ outcome: 'dead_letter' }, result.dead);
       await commit(batch);
       stats.processed += batch.length;
       stats.counted += result.counted;

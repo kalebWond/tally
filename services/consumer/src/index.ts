@@ -1,5 +1,6 @@
 import { TOPICS } from '@tally/contracts';
 import { createDb } from '@tally/db';
+import { createMetrics } from '@tally/metrics';
 import { sql } from 'drizzle-orm';
 import { Redis } from 'ioredis';
 import { pino } from 'pino';
@@ -16,6 +17,7 @@ const config = loadConfig();
 const log = pino({ level: config.LOG_LEVEL });
 const { db, close: closeDb } = createDb(config.DATABASE_URL);
 const redis = new Redis(config.REDIS_URL, { maxRetriesPerRequest: 3 });
+const metrics = createMetrics('consumer');
 const consumer = createVoteConsumer({
   brokers: config.KAFKA_BROKERS,
   topic: TOPICS.raw,
@@ -24,6 +26,7 @@ const consumer = createVoteConsumer({
   db,
   redis,
   log,
+  metrics,
 });
 
 const within = <T>(p: Promise<T>, ms = 1000) =>
@@ -34,11 +37,14 @@ const probe = (p: () => Promise<unknown>) =>
     () => 'disconnected' as const,
   );
 
-const server = createHealthServer(async () => ({
-  redpanda: (await consumer.isReady()) ? 'connected' : 'disconnected',
-  postgres: await probe(() => db.execute(sql`select 1`)),
-  redis: await probe(() => redis.ping()),
-}));
+const server = createHealthServer(
+  async () => ({
+    redpanda: (await consumer.isReady()) ? 'connected' : 'disconnected',
+    postgres: await probe(() => db.execute(sql`select 1`)),
+    redis: await probe(() => redis.ping()),
+  }),
+  metrics,
+);
 server.listen(config.PORT, '0.0.0.0', () => log.info({ port: config.PORT }, 'consumer listening'));
 
 // Redis must be rebuildable from Postgres: mirror what Postgres holds before consuming.

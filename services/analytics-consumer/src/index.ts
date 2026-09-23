@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import { createClient } from '@clickhouse/client';
 import { type HealthResponse, TOPICS } from '@tally/contracts';
+import { createMetrics } from '@tally/metrics';
 import { pino } from 'pino';
 import { loadConfig } from './config.js';
 import { createAnalyticsConsumer } from './consumer.js';
@@ -18,18 +19,26 @@ const clickhouse = createClient({
   database: config.CLICKHOUSE_DB,
   request_timeout: 30_000,
 });
+const metrics = createMetrics('analytics-consumer');
 const consumer = createAnalyticsConsumer({
   brokers: config.KAFKA_BROKERS,
   topics: [TOPICS.raw, TOPICS.dead],
   groupId: GROUP_ID,
   clickhouse,
   log,
+  metrics,
 });
 
 const within = <T>(p: Promise<T>, ms = 1000) =>
   Promise.race([p, new Promise<never>((_, reject) => setTimeout(reject, ms).unref())]);
 
 const server = createServer((req, res) => {
+  if (req.method === 'GET' && req.url === '/metrics') {
+    void metrics
+      .render()
+      .then((body) => res.writeHead(200, { 'content-type': metrics.contentType }).end(body));
+    return;
+  }
   if (req.method !== 'GET' || req.url !== '/health') {
     res.writeHead(404).end();
     return;

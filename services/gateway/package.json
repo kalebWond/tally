@@ -14,8 +14,10 @@
   },
   "dependencies": {
     "@tally/contracts": "workspace:*",
+    "@tally/metrics": "workspace:*",
     "ioredis": "^6.0.0",
     "pino": "^10.3.1",
+    "prom-client": "^15.1.3",
     "ws": "^8.21.3",
     "zod": "^4.6.5"
   },

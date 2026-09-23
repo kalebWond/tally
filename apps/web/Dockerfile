@@ -5,11 +5,13 @@ ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0 npm_config_store_dir=/pnpm/store npm_confi
 WORKDIR /repo
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 COPY packages/contracts/package.json packages/contracts/
+COPY packages/metrics/package.json packages/metrics/
 COPY packages/db/package.json packages/db/
 COPY apps/web/package.json apps/web/
 # Dependency install scripts are skipped: only esbuild has one, and it just validates the binary.
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store,sharing=locked pnpm install --frozen-lockfile --ignore-scripts --filter @tally/web...
 COPY packages/contracts packages/contracts
+COPY packages/metrics packages/metrics
 COPY packages/db packages/db
 COPY apps/web apps/web
 ENV NEXT_TELEMETRY_DISABLED=1

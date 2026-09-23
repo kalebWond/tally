@@ -15,7 +15,9 @@
   "dependencies": {
     "@platformatic/kafka": "^2.12.0",
     "@tally/contracts": "workspace:*",
+    "@tally/metrics": "workspace:*",
     "fastify": "^5.12.5",
+    "prom-client": "^15.1.3",
     "zod": "^4.6.5"
   },
   "devDependencies": {

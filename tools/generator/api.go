@@ -16,6 +16,27 @@ func newMux(e *Engine) *http.ServeMux {
 		writeJSON(w, http.StatusOK, HealthResponse{Status: "ok", Service: "generator"})
 	})
 
+	// Prometheus text format (F23), written by hand to stay standard-library only. The counters
+	// cover the current or last run and restart from zero at each /start; Prometheus's rate()
+	// treats that as a counter reset.
+	mux.HandleFunc("GET /metrics", func(w http.ResponseWriter, _ *http.Request) {
+		s := e.Status()
+		running := 0
+		if s.Running {
+			running = 1
+		}
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+		metric := func(name, kind, help string, value any) {
+			fmt.Fprintf(w, "# HELP %s %s\n# TYPE %s %s\n%s{service=\"generator\"} %v\n", name, help, name, kind, name, value)
+		}
+		metric("tally_generator_running", "gauge", "1 while a run is in progress", running)
+		metric("tally_generator_target_rate", "gauge", "Votes per second asked for right now (burst included)", s.CurrentRate)
+		metric("tally_generator_sent_total", "counter", "Votes sent to ingest this run", s.SentTotal)
+		metric("tally_generator_accepted_total", "counter", "Votes ingest answered 202 this run", s.Accepted)
+		metric("tally_generator_rejected_total", "counter", "Votes ingest answered with another status this run", s.Rejected)
+		metric("tally_generator_failed_total", "counter", "Votes that got no answer this run", s.Failed)
+	})
+
 	mux.HandleFunc("GET /status", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, e.Status())
 	})

@@ -5,6 +5,7 @@ import {
   type MessagesStream,
   stringDeserializers,
 } from '@platformatic/kafka';
+import { createMetrics, type Metrics } from '@tally/metrics';
 import type { Logger } from 'pino';
 import { type DeadRow, type RawRow, toRow } from './rows.js';
 import { insertBatch } from './sink.js';
@@ -15,6 +16,8 @@ interface AnalyticsConsumerOptions {
   groupId: string;
   clickhouse: ClickHouseClient;
   log: Logger;
+  /** Defaults to a fresh registry (tests); the service passes the one it serves. */
+  metrics?: Metrics;
   /** ClickHouse likes big inserts: flush at this many messages… */
   maxBatch?: number;
   /** …or this long after the last flush. */
@@ -39,7 +42,22 @@ export function createAnalyticsConsumer(opts: AnalyticsConsumerOptions) {
     connectTimeout: 1000,
   });
 
+  const metrics = opts.metrics ?? createMetrics('analytics-consumer');
   const stats = { raw: 0, dead: 0, skipped: 0, batches: 0 };
+  const rowsTotal = metrics.counter(
+    'tally_analytics_rows_total',
+    'Rows inserted into ClickHouse, by table',
+    ['table'],
+  );
+  const insertSeconds = metrics.histogram(
+    'tally_analytics_insert_duration_seconds',
+    'One batch insert',
+    [0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
+  );
+  const failures = metrics.counter(
+    'tally_analytics_insert_failures_total',
+    'Inserts that failed and were retried',
+  );
   let buffer: Msg[] = [];
   let queue = Promise.resolve();
   let stopping = false;
@@ -62,10 +80,15 @@ export function createAnalyticsConsumer(opts: AnalyticsConsumerOptions) {
       else stats.skipped++;
     }
     for (let attempt = 1; ; attempt++) {
+      const stopTimer = insertSeconds.startTimer();
       try {
         await insertBatch(clickhouse, raw, dead);
+        stopTimer();
+        rowsTotal.inc({ table: 'votes_raw' }, raw.length);
+        rowsTotal.inc({ table: 'votes_dead' }, dead.length);
         return { raw: raw.length, dead: dead.length };
       } catch (err) {
+        failures.inc();
         log.error({ err, attempt, size: batch.length }, 'insert failed, retrying');
         if (stopping) return undefined;
         await sleep(Math.min(250 * 2 ** (attempt - 1), 10_000));

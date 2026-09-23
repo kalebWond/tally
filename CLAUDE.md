@@ -52,6 +52,7 @@ TypeScript everywhere except the load generator, which is Go.
 - Go (generator): `pnpm test:go` / `scripts/go.sh <go args>` use host Go if installed, otherwise the `golang:1.27-alpine` image. After changing a contract the generator speaks, run `pnpm --filter @tally/contracts export-schemas`.
 - `pnpm lint` (Biome), `pnpm typecheck`, `pnpm test` (Vitest), `pnpm check:health`.
 - Analytics: `analytics-consumer` (port 4004, group `tally-analytics`) copies votes.raw and votes.dead into ClickHouse `votes_raw` / `votes_dead`, creating the tables at startup. Rows are as delivered: count votes as `uniqExact(key_hash)`; counted = accepted − rejected (`votes_dead.sent_at` is the vote's minute). Schema changes are new entries in `MIGRATIONS` (`src/schema.ts`), never edits to applied ones. `pnpm bench:clickhouse` benchmarks the per-minute queries. Query it: `curl 'http://localhost:8123/?user=tally&password=tally&database=tally' --data-binary 'SELECT …'`.
+- Metrics: every service serves `GET /metrics` (`@tally/metrics`; the Go generator writes the text format by hand). Prometheus :9090 and Grafana :3001 (anonymous viewer) run in the `app` profile. The dashboard is generated: edit `scripts/grafana-dashboard.py`, run it, commit the JSON. Consumer lag comes from Redpanda's metrics, not the consumers.
 - `pnpm load <smoke|steady|spike>` runs k6 (in a container, in the compose network) against the running `app` stack, then checks zero loss and reconciliation; the report lands in `load-results/`. It stops the Go generator first.
 - `pnpm reconcile [--repair] [--contest <uuid>] [--json]` recounts from `votes` and checks every derived count (Postgres and Redis); in containers, `docker compose run --rm reconcile …`. It pauses each contest's counting briefly while it runs.
 - Every new service gets its own Dockerfile and a compose entry under the `app` profile when it's created.
@@ -124,11 +125,11 @@ A feature is done when its check in `IMPLEMENTATION_PLAN.md` passes, tests cover
 
 Update this section as you go.
 
-**Last completed:** F22, analytics page (2026-09-24)
-**Next up:** F23, metrics and dashboards (see `IMPLEMENTATION_PLAN.md`).
+**Last completed:** F23, metrics and dashboards (2026-09-24)
+**Next up:** F24, card grid view (see `IMPLEMENTATION_PLAN.md`; CLAUDE.md "One component, two layouts" applies). Outstanding: the k6 spike regression since F19 (DECISIONS, F23).
 
 **Seed contest:** `0192f3a0-7c1e-7000-8000-00000000c0de`, codes `C1`–`C10`.
 
 **Operator pages:** `/control` (generator panel), `/admin/contests` (open/close/reopen), `/admin/contestants`, `/admin/dead-letters` and `/admin/analytics` (ClickHouse only), behind `ADMIN_PASSWORD` from `.env`. Contestant codes are fixed once created; deactivate instead of deleting. Checks that close the seed contest must reopen it. Web now talks to Redis for one thing: the contest status in the meta hash. The consumer rebuilds Redis totals and minutes from Postgres every time it starts.
 
-**Known gaps:** Go isn't installed on the dev machine; `scripts/go.sh` runs it in a container.
+**Known gaps:** Go isn't installed on the dev machine; `scripts/go.sh` runs it in a container. k6 at 3,000/s misses p95 < 50 ms on the full stack (70–107 ms; F23). Check scripts that drive headless Chrome must kill its whole process group, or renderers linger.
