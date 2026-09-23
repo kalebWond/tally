@@ -120,8 +120,8 @@ A feature is done when its check in `IMPLEMENTATION_PLAN.md` passes, tests cover
 
 Update this section as you go.
 
-**Last completed:** F9, animated counters (2026-09-23)
-**Next up:** F10, reorder animation. Rows are `<li key={id}>` in `LiveStandings`; animate with Motion `layout`.
+**Last completed:** F10, reorder animation (2026-09-23)
+**Next up:** F11, connection handling. `useLiveTotals` has a `connection` state but no reconnect yet; the gateway closes with 1001 on shutdown.
 
 **Seed contest:** `0192f3a0-7c1e-7000-8000-00000000c0de`, codes `C1`–`C10`.
 

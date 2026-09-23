@@ -105,6 +105,8 @@ Build one feature per session. Each has a goal, a build list, and a check that d
 
 **Build:** Layout animation via Motion so rows move to their new positions instead of snapping.
 
+*Decided (F10):* `layout="position"`, no-bounce spring, and an overtake treatment (riser drawn on top, accent glow). Verified by per-frame sampling in headless Chrome, with no-layout and index-key controls.
+
 **Done when:** A contestant overtaking another visibly slides past them, and rapid position changes never leave rows overlapping or stuck.
 
 ---

@@ -55,6 +55,7 @@ Where the build departs from `SPEC.md` or `IMPLEMENTATION_PLAN.md`, or pins down
 | Ranking | total desc, ties by code in natural order, competition ranks (1, 2, 2, 4) | F8 |
 | shadcn/ui timing (stack lists it) | deferred to F13/F14, where forms need it; the results list is custom | F8 |
 | Counter behaviour | first snapshot shows instantly (no count-up on load); later totals spring, overdamped so a count never overshoots or goes backwards; reduced motion jumps | F9 |
+| Reorder animation | Motion `layout="position"` on ID-keyed rows, no-bounce 0.45 s spring; the overtaking row draws above the rows it passes and its accent edge glows for 0.8 s; instant for reduced motion | F10 |
 
 ### Outstanding: a rule not met yet
 
@@ -311,3 +312,22 @@ Production build: 60 fps, 40 retargets, 0 stalls, and it settled exactly on the 
 ## F9 — Found on the way: web dev couldn't start on the host
 
 F8 set the web dev script to `node --env-file-if-exists=../../.env …/next dev`. Next forwards `execArgv` into `NODE_OPTIONS` for its workers, where Node rejects `--env-file-if-exists`, so `next dev` exited immediately. F8's checks ran against the production container, which is why it went unnoticed. **Fix:** `next.config.ts` reads the repo-root `.env` with `util.parseEnv` and fills in only missing variables. Real environment variables win, and containers have no such file, so it's a no-op there. The dev script is plain `next dev --port 3000` again.
+
+## F10 — Reorder is Motion layout animation on ID-keyed rows
+
+**Decided:** each row is a `motion.li` with `layout="position"`, keyed by contestant ID. The transition is a no-bounce spring (`bounce: 0`, 0.45 s). `MotionConfig reducedMotion="user"` makes reorders and counters instant for reduced-motion users.
+**Why:** the layout system measures where each keyed row was and where it now is, and animates the difference with transforms, so the list is never re-rendered as a sequence of in-between states. `position` rather than `true`: rows never change size, so there's no scale correction to distort text and avatars. No bounce: an overshooting spring would push a row past its slot into its neighbour's and back. Interrupted mid-flight, Motion continues from the row's current on-screen position, so rapid swaps glide rather than snap.
+
+## F10 — Overtake treatment: the riser draws on top and glows
+
+**Decided:** a pure `movements(prevOrder, nextOrder)` marks rows that moved up or down (unit-tested). For 0.8 s a riser gets `z-index: 2` (fallers get 0) and its accent edge flares via a CSS keyframe. Marks carry a token, so an older timer can't clear a newer overtake by the same row, and every mark expires, so a storm can't leave a row stuck "rising".
+**Why:** without stacking order, two sliding rows blend as they cross. With the riser on top it visibly *passes*, which is the signature moment.
+
+## F10 — How "slides past, never overlapping or stuck" was measured
+
+Headless Chrome sampled every row's on-screen position every frame.
+- **Overtake:** the closest mid-table pair; the lower one gets just enough votes to pass. Production: C3 passed C7 through **18** in-between frames and ended exactly in its new slot.
+- **Storm:** two contestants swap every 300 ms, 14 times, faster than the 450 ms slide, so every animation is interrupted. After 2 s: on-screen order matches the totals, **0** overlapping rows, **0** rows left with a transform.
+- **Controls on the dev server:** real 19 in-between frames; `layout` removed: **0** (snaps); rows keyed by index: **0** (rows stay put and contents swap, the classic mistake). The storm check passes for controls too, as it should with nothing animating; it guards against animation debris, not the slide itself.
+
+**Observed, not changed:** on a large burst, the row reorders immediately (sorting uses the real totals) while its counter is still springing up, so for about 0.4 s a row can sit above one showing a bigger number (seen mid-overtake: 647 above 931). Sorting by displayed values instead would delay overtakes behind the counter animation. Left as is; revisit if it reads badly on the demo video.

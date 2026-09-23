@@ -124,6 +124,11 @@ body {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 6px;
+  /* z-index needs a positioned box: the overtaking row draws above the rows it passes. */
+  position: relative;
+}
+.row[data-rising] {
+  animation: overtake 800ms ease-out;
 }
 .row[data-leader] {
   background: linear-gradient(
@@ -218,6 +223,19 @@ body {
   }
 }
 
+/* The overtaker's edge flares in its accent colour, then fades back. */
+@keyframes overtake {
+  0% {
+    box-shadow:
+      0 0 0 1px var(--accent-from),
+      0 0 28px -4px var(--accent-from);
+  }
+  100% {
+    box-shadow:
+      0 0 0 1px transparent,
+      0 0 0 0 transparent;
+  }
+}
 @keyframes pulse {
   50% {
     opacity: 0.35;
@@ -225,6 +243,9 @@ body {
 }
 @media (prefers-reduced-motion: reduce) {
   .board-status[data-state="live"]::before {
+    animation: none;
+  }
+  .row[data-rising] {
     animation: none;
   }
 }
