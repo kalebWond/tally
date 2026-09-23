@@ -219,6 +219,8 @@ Build one feature per session. Each has a goal, a build list, and a check that d
 
 **Build:** Wide events table suited to scans, with a sensible ordering key.
 
+*Decided (F21):* `votes_raw` sorted by `(contest_id, sent_at, idempotency_key)`, distinct votes as `uniqExact(key_hash)`, rejections filed under their vote's minute; per-minute rollups tried and dropped (slower when exact). `pnpm bench:clickhouse`: 10M votes per minute in 313 ms, last 30 min in 56 ms; matches Postgres minute for minute.
+
 **Done when:** A group-by-minute query over several million rows returns fast.
 
 ---

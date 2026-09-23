@@ -21,6 +21,7 @@
     "down": "docker compose --profile app down",
     "reconcile": "pnpm --filter @tally/consumer reconcile",
     "load": "node scripts/load.mjs",
+    "bench:clickhouse": "pnpm --filter @tally/analytics-consumer bench",
     "check:health": "scripts/check-health.sh",
     "test:go": "scripts/go.sh test -count=1 ./..."
   },

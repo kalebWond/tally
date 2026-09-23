@@ -65,6 +65,8 @@ The analytics consumer runs in a **separate consumer group**, so it reads the sa
 
 *Decided (F20):* it reads `votes.dead` too (into `votes_dead`), so analytics tells counted from rejected votes without Postgres. Rows are stored as delivered (at-least-once); readers count distinct `idempotency_key`s. Port 4004.
 
+*Decided (F21):* tables `votes_raw` (sorted by contest, time) and `votes_dead` (each rejection carries its vote's `sent_at`); votes are counted as `uniqExact(key_hash)`; counted = accepted − rejected. No rollup tables.
+
 ### Design principles
 
 1. **The ingest path stays thin.** Validate shape, hash the sender, publish. No database access on the hot path.

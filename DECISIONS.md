@@ -84,6 +84,7 @@ Where the build departs from `SPEC.md` or `IMPLEMENTATION_PLAN.md`, or pins down
 | Reconciliation command | `pnpm reconcile [--repair] [--contest <uuid>] [--json]` on the host; `docker compose run --rm reconcile …` (profile `tools`, consumer image). Checks `vote_totals`, `vote_buckets`, Redis totals, `totalVotes`, minutes and `lastMinute` against a recount of `votes`. Exit 0 = no drift or all repaired, 1 = drift left, 2 = error | F18 |
 | Load test | `pnpm load <smoke\|steady\|spike>`: k6 (`grafana/k6:2.3.0`, `tools/load/votes.js`, open model) in the compose network against `ingest:4000`; steady = ramp to 1,000/s, hold 3 min; spike = 500/s → 3,000/s for 1 min → 500/s. Reports in `load-results/*.md` (raw JSON/CSV gitignored); results published in README | F19 |
 | Analytics pipeline | `services/analytics-consumer` (port 4004), consumer group `tally-analytics`, reads **both** `votes.raw` and `votes.dead` into ClickHouse `votes_raw` / `votes_dead`; ClickHouse 26.9 in the default compose profile (port 8123, user/db `tally`); schema created at startup. `HealthResponse` gained optional `clickhouse` | F20 |
+| ClickHouse schema | versioned migrations in `services/analytics-consumer/src/schema.ts` (`_migrations` table, applied at startup); `votes_raw` ORDER BY `(contest_id, sent_at, idempotency_key)`; both tables gain `key_hash UInt64 MATERIALIZED cityHash64(idempotency_key)`; `votes_dead.sent_at` = the original vote's; readers count votes as `uniqExact(key_hash)`, counted = accepted − rejected per minute | F21 |
 
 ### Outstanding: a rule not met yet
 
@@ -581,4 +582,16 @@ Generator at 1,000 votes/s with a results page open; the live path sampled every
 - **Unaffected:** the page's total moved in 67 of 67 samples. The totals consumer's lag stayed a median of 90 (max 190), the page stayed about 300 votes behind Postgres (400 before), and ingest p95 was 9.1 ms (9.3 before). 184,710 accepted, 0 rejected or failed. Meanwhile the analytics backlog reached 121,154 messages.
 - **Caught up:** 121,494 messages in 12.0 s after restart (about 10,000 msg/s), with live traffic still running.
 - **Complete:** ClickHouse had every vote of the run exactly once by key: **184,710 = Postgres = accepted**.
+
+## F21 — No rollups: the sorted table plus a key hash is fast enough, and exact
+**Decided:** analytics queries scan `votes_raw` directly. Its sort key `(contest_id, sent_at, idempotency_key)` prunes to one contest (the benchmark read exactly the 10M rows of the contest under test, none of the other 10M) and keeps each time range contiguous. Distinct votes are counted as `uniqExact(key_hash)`, a materialized `cityHash64` of the idempotency key: 313 ms against 568 ms for distinct strings over 10M votes. The odds of a hash collision among even 100M keys are about 1 in 3,700 (birthday bound), and on the live data there are none (3,185,053 distinct hashes = distinct keys). "Counted" per minute = distinct accepted − distinct rejected, with each rejection filed under its vote's `sent_at` (a new `votes_dead.sent_at`, derived from the original on insert and materialized for existing rows). Timestamps gained DoubleDelta+ZSTD codecs.
+**Tried and dropped:** per-minute rollups (`AggregatingMergeTree` with `uniqExactState` via materialized views). An exact distinct count's state is the set of keys itself, so the "rollup" stored every key again (31 MB for 2M votes) and merging those sets was *slower* than scanning: 89–174 ms against 50 ms at 1M votes. The ways to make a rollup cheap (`count()`, or approximate `uniq`) would count redelivered votes twice or give up exactness. Measured duplicates on the live data: 1 row in 3.2M.
+**Also:** the schema is now versioned migrations recorded in `_migrations`, not create-if-missing statements, since the tables had started to change. One analytics consumer runs at a time, so there's no lock, and every statement is safe to repeat if a migration dies part-way.
+
+## F21 — How "a group-by-minute query over several million rows returns fast" was verified
+`pnpm bench:clickhouse` (report in `load-results/clickhouse-*.md`) builds a throwaway database with the production migrations. It has 10M synthetic votes for one contest over 3 h, 10M for another, and 5% rejected, and times each query (server-side elapsed, median of 5 warm runs, query cache off):
+- **Votes per minute, whole contest (10M), exact:** **313 ms**. The same with `count()`: 133 ms, but not redelivery-proof.
+- **Counted per minute (accepted − rejected):** 330 ms. **Per minute per contestant** (lead changes): 393 ms. **By source:** 408 ms.
+- **Last 30 minutes:** **56 ms**, reading 1.7M rows; the sort key limits it to the range.
+- **Correct, not just fast:** on the live contest, ClickHouse's counted-per-minute equals Postgres's `vote_buckets` in all 83 minutes (**3,152,708 = 3,152,708**, 0 mismatched), computed without asking Postgres.
 

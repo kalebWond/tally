@@ -4,7 +4,7 @@ import { type HealthResponse, TOPICS } from '@tally/contracts';
 import { pino } from 'pino';
 import { loadConfig } from './config.js';
 import { createAnalyticsConsumer } from './consumer.js';
-import { ensureSchema } from './schema.js';
+import { migrate } from './schema.js';
 
 /** Its own group: separate offsets from `tally-consumer`, so neither can hold the other back. */
 const GROUP_ID = 'tally-analytics';
@@ -56,7 +56,7 @@ server.listen(config.PORT, '0.0.0.0', () =>
   log.info({ port: config.PORT }, 'analytics consumer listening'),
 );
 
-await ensureSchema(clickhouse);
+await migrate(clickhouse, log);
 await consumer.start();
 log.info({ topics: [TOPICS.raw, TOPICS.dead], group: GROUP_ID }, 'consuming');
 const statsTimer = setInterval(() => log.info(consumer.stats(), 'progress'), 30_000);

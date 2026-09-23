@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { type ClickHouseClient, createClient } from '@clickhouse/client';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { DeadRow, RawRow } from './rows.js';
-import { ensureSchema } from './schema.js';
+import { migrate } from './schema.js';
 import { insertBatch } from './sink.js';
 
 // Against the real ClickHouse (CLICKHOUSE_URL), in a throwaway database.
@@ -34,8 +34,8 @@ beforeAll(async () => {
   admin = createClient(conn);
   await admin.command({ query: `CREATE DATABASE ${dbName}` });
   ch = createClient({ ...conn, database: dbName });
-  await ensureSchema(ch);
-  await ensureSchema(ch); // idempotent: startup runs it every time
+  await migrate(ch);
+  await migrate(ch); // startup runs it every time: a second run must be a no-op
 });
 afterAll(async () => {
   await admin?.command({ query: `DROP DATABASE IF EXISTS ${dbName}` });
@@ -77,6 +77,43 @@ describe('insertBatch', () => {
     await insertBatch(ch, [], [dead]);
     expect(await q('SELECT reason, contest_id, original FROM votes_dead')).toEqual([
       { reason: 'malformed', contest_id: null, original: '{"raw":"not json"}' },
+    ]);
+  });
+
+  it("per-minute counts: distinct votes, rejections filed under their vote's minute, redelivery-proof", async () => {
+    await ch.command({ query: 'TRUNCATE TABLE votes_raw' });
+    await ch.command({ query: 'TRUNCATE TABLE votes_dead' });
+    const minuteA = '2026-09-24T11:00:10.000Z';
+    const minuteB = '2026-09-24T11:01:10.000Z';
+    const votes = [raw('a1', minuteA), raw('a2', minuteA), raw('b1', minuteB)];
+    await insertBatch(ch, votes, []);
+    await insertBatch(ch, votes, []); // redelivery
+    // a2 was rejected (contest closed) a minute later than it was accepted.
+    const rejected: DeadRow = {
+      idempotency_key: 'a2',
+      reason: 'contest_closed',
+      contest_id: '0192f3a0-7c1e-7000-8000-00000000c0de',
+      code: 'C1',
+      failed_at: '2026-09-24T11:02:00.000Z',
+      original: JSON.stringify({ sent_at: minuteA, code: 'C1' }),
+      kafka_partition: 0,
+      kafka_offset: '4',
+    };
+    await insertBatch(ch, [], [rejected, rejected]);
+
+    const perMinute = await q<{
+      minute: string;
+      accepted: number | string;
+      rejected: number | string;
+    }>(`
+      SELECT minute, accepted, rejected FROM
+        (SELECT toStartOfMinute(sent_at) AS minute, uniqExact(key_hash) AS accepted FROM votes_raw GROUP BY minute) AS a
+      LEFT JOIN
+        (SELECT toStartOfMinute(sent_at) AS minute, uniqExact(key_hash) AS rejected FROM votes_dead GROUP BY minute) AS d
+      USING minute ORDER BY minute`);
+    expect(perMinute.map((r) => [r.minute, Number(r.accepted), Number(r.rejected)])).toEqual([
+      ['2026-09-24 11:00:00', 2, 1],
+      ['2026-09-24 11:01:00', 1, 0],
     ]);
   });
 });
