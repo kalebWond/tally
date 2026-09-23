@@ -24,7 +24,7 @@ Full detail lives in `SPEC.md`. Build order lives in `IMPLEMENTATION_PLAN.md`. D
 
 **Log decisions.** Anything non-obvious goes in `DECISIONS.md` as a short entry: what was decided, what the alternatives were, why. This file becomes the case study and interview prep, so it matters.
 
-**Commit per feature.** Message format: `F7: realtime gateway`, plus a what/why bullet body. The user commits, using `/feature-commit` (`.claude/skills/feature-commit`).
+**Commit per feature.** Message format: `F7: realtime gateway`, plus a what/why bullet body, no Co-Authored-By trailer (the `/feature-commit` format). Since F18, Claude commits at the end of each feature and takes its recommended option on design questions, logging each in `DECISIONS.md`.
 
 ---
 
@@ -51,6 +51,7 @@ TypeScript everywhere except the load generator, which is Go.
 - `packages/*` import each other with `.ts` extensions (Turbopack can't map `.js` → `.ts`); services use `.js`. A bundled workspace package's runtime deps must also be the app's deps.
 - Go (generator): `pnpm test:go` / `scripts/go.sh <go args>` use host Go if installed, otherwise the `golang:1.27-alpine` image. After changing a contract the generator speaks, run `pnpm --filter @tally/contracts export-schemas`.
 - `pnpm lint` (Biome), `pnpm typecheck`, `pnpm test` (Vitest), `pnpm check:health`.
+- `pnpm load <smoke|steady|spike>` runs k6 (in a container, in the compose network) against the running `app` stack, then checks zero loss and reconciliation; the report lands in `load-results/`. It stops the Go generator first.
 - `pnpm reconcile [--repair] [--contest <uuid>] [--json]` recounts from `votes` and checks every derived count (Postgres and Redis); in containers, `docker compose run --rm reconcile …`. It pauses each contest's counting briefly while it runs.
 - Every new service gets its own Dockerfile and a compose entry under the `app` profile when it's created.
 
@@ -122,8 +123,8 @@ A feature is done when its check in `IMPLEMENTATION_PLAN.md` passes, tests cover
 
 Update this section as you go.
 
-**Last completed:** F18, reconciliation job (2026-09-23)
-**Next up:** F19, load testing with k6 (steady ramp and spike profiles; throughput, p95/p99, consumer lag; a reproducible command and a results table for the README). k6 isn't installed on the host: run it in the `grafana/k6` image, like `scripts/go.sh` does for Go.
+**Last completed:** F19, load testing with k6 (2026-09-24)
+**Next up:** F20, analytics consumer (see `IMPLEMENTATION_PLAN.md`; ClickHouse arrives with F20–F22).
 
 **Seed contest:** `0192f3a0-7c1e-7000-8000-00000000c0de`, codes `C1`–`C10`.
 

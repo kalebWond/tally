@@ -20,6 +20,7 @@
     "stack:up": "docker compose --profile app up -d --build --wait",
     "down": "docker compose --profile app down",
     "reconcile": "pnpm --filter @tally/consumer reconcile",
+    "load": "node scripts/load.mjs",
     "check:health": "scripts/check-health.sh",
     "test:go": "scripts/go.sh test ./..."
   },

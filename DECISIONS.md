@@ -82,6 +82,7 @@ Where the build departs from `SPEC.md` or `IMPLEMENTATION_PLAN.md`, or pins down
 | Contest lifecycle | `POST /api/contests/:id/status { status: "open" \| "closed" }` → `{ contest, liveUpdated }`; allowed draft → open, open → closed, closed → open (reopen); anything else 409. Opening stamps `opens_at` and clears `closes_at`; closing stamps `closes_at` | F16 |
 | Which votes a contest counts | exactly those ingest accepted (`sent_at`) while it was open: `opens_at ≤ sent_at` and, once closed, `sent_at < closes_at`. Draft counts nothing. Null `opens_at` = open since creation. Everything else → `contest_closed` | F16 |
 | Reconciliation command | `pnpm reconcile [--repair] [--contest <uuid>] [--json]` on the host; `docker compose run --rm reconcile …` (profile `tools`, consumer image). Checks `vote_totals`, `vote_buckets`, Redis totals, `totalVotes`, minutes and `lastMinute` against a recount of `votes`. Exit 0 = no drift or all repaired, 1 = drift left, 2 = error | F18 |
+| Load test | `pnpm load <smoke\|steady\|spike>`: k6 (`grafana/k6:2.3.0`, `tools/load/votes.js`, open model) in the compose network against `ingest:4000`; steady = ramp to 1,000/s, hold 3 min; spike = 500/s → 3,000/s for 1 min → 500/s. Reports in `load-results/*.md` (raw JSON/CSV gitignored); results published in README | F19 |
 
 ### Outstanding: a rule not met yet
 
@@ -547,4 +548,21 @@ On the running stack, with a results page open. 13 of 13 checks passed:
 - **Idle:** C1 set to 5 (truth 126,074) and C2 set 12,345 too high. The open page showed the bad C1. `pnpm reconcile` exited 1 with `redis_totals C1 126,074 5` and `redis_totals C2 83,915 96,260`. `--repair` exited 0, Redis went back to the recount, and the open page showed the true counts again without a reload. A second check found no drift.
 - **Mid-run at 1,500 votes/s:** C3 and `totalVotes` set to 99,999,999 survived 2 s of live traffic. `docker compose run --rm reconcile --repair` found and fixed both, with counting paused 741 ms. After the run, no drift in any layer (993,029 votes), and 0 votes rejected or failed.
 - **Before any corruption,** a first check on the real dev data (972,856 votes) found no drift.
+
+## F19 — Load test: k6 in a container, one script that also proves zero loss
+**Decided:** k6 in the pinned `grafana/k6:2.3.0` image (nothing installed on the host), one script with three profiles taken from SPEC §8: `steady` ramps to 1,000/s over a minute and holds it for 3; `spike` goes from a 500/s baseline to 3,000/s for a minute and back; `smoke` is a 20 s harness check. It's an open model (`ramping-arrival-rate`): votes arrive on schedule whether or not earlier ones were answered, like SMS traffic. So a slow ingest shows up as latency or dropped iterations, never as a quietly lowered rate. Each vote carries `Idempotency-Key: k6-<run>-<vu>-<iter>`, so this run's votes can be found exactly afterwards. Requests on the plateau are tagged `phase=peak`, and latency there is reported separately from the whole run (the ramps and baseline dilute it: the first spike run showed p95 22 ms overall).
+`scripts/load.mjs` wraps the run:
+- **Before:** checks the contest is open and ingest is healthy, and stops the Go generator so no other traffic mixes in.
+- **During:** samples consumer lag from `rpk group describe` every second.
+- **After:** waits for lag 0, then compares k6's 202 count with votes in Postgres carrying this run's keys (zero loss means equal, with none dead-lettered), and runs `pnpm reconcile`.
+- **Output:** writes `load-results/<run>.md`, exiting non-zero if p95 or error or loss or reconciliation fails.
+**Why a wrapper:** k6 alone measures ingest. The claims that matter here are "nothing lost" and "counts stay exact under load", and those need the queue and the database.
+
+## F19 — Found: docker-proxy distorted the spike numbers
+The second spike run, with k6 on the host network hitting `localhost:4000`, failed: p95 at the peak 70.7 ms, 929 dropped iterations, and consumer lag rising to 12,069 (nothing lost, no drift). The first identical run had passed. `ps` showed `docker-proxy`, Docker's userspace port forwarder, busy copying every request. k6 now runs in the compose network and calls `ingest:4000` directly, as a load balancer in front of a deployment would. Two spike runs that way both passed: p95 14.4 and 20.1 ms. This machine is a laptop shared with a desktop session, so run-to-run variance is real, and the README shows both runs and says so.
+
+## F19 — How "a reproducible command and a results table good enough to publish" was verified
+`pnpm load steady` and `pnpm load spike` (twice) on the containerised stack; reports committed in `load-results/`, table in the README:
+- **Steady:** 1,000 votes/s delivered through the hold; p50/p95/p99 **4.1 / 7.0 / 8.2 ms**; 0 errors; max lag 140; 217,499 accepted = 217,499 counted; no drift.
+- **Spike:** 3,000 votes/s delivered at the peak; p95 **14.4 ms** (second run 20.1 ms, with 32 of 282,499 iterations dropped by k6); 0 errors; max lag about 1,000, drained in 0.2 s; every accepted vote counted; no drift.
 

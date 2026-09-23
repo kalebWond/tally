@@ -6,3 +6,6 @@ next-env.d.ts
 coverage/
 .env
 tools/generator/bin/
+# Load-test raw output; the markdown reports are committed.
+load-results/*.json
+load-results/*.csv

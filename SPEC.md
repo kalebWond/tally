@@ -265,6 +265,8 @@ POST           /api/contests/:id/status
 
 Verified with k6 against the ingest API; results published in the README.
 
+*Decided (F19):* `pnpm load <steady|spike>` runs k6 in the compose network and also checks zero loss (accepted = counted) and reconciliation. Measured: 1,000/s p95 7.0 ms; 3,000/s p95 14–20 ms; no loss, no drift.
+
 ---
 
 ## 9. Frontend Specification

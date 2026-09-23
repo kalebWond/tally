@@ -199,6 +199,8 @@ Build one feature per session. Each has a goal, a build list, and a check that d
 
 **Build:** k6 scripts for a steady ramp and a spike profile. Capture throughput, p95 and p99 latency, and consumer lag.
 
+*Decided (F19):* `pnpm load <smoke|steady|spike>` (k6 in a container, in the compose network) also measures consumer lag and drain, and checks zero loss and reconciliation after each run. Results: README "Performance" and `load-results/`.
+
 **Done when:** You have a reproducible command and a results table good enough to publish in the README.
 
 ---
