@@ -116,6 +116,20 @@ services:
     build: { context: ., dockerfile: services/consumer/Dockerfile }
     ports: ["4003:4003"]
 
+  # F18, one-shot: docker compose run --rm reconcile [--repair] [--contest <uuid>] [--json]
+  # Its own profile, so `up` never runs it. Same image as the consumer.
+  reconcile:
+    <<: *node-service
+    profiles: [tools]
+    restart: "no"
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    build: { context: ., dockerfile: services/consumer/Dockerfile }
+    entrypoint: ["node", "dist/reconcile.js"]
+    command: []
+    ports: []
+
   web:
     <<: *node-service
     environment:

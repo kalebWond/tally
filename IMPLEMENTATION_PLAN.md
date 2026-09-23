@@ -189,6 +189,8 @@ Build one feature per session. Each has a goal, a build list, and a check that d
 
 **Build:** Command that recounts from the `votes` table, compares with Redis and `vote_totals`, and reports drift. Optional repair flag.
 
+*Decided (F18):* also checks `vote_buckets` and the Redis minutes; runs per contest under the contest lock (counting pauses well under a second), so it's exact during live traffic; `--repair` rewrites Postgres and overwrites Redis, so too-high values come down. `pnpm reconcile` / `docker compose run --rm reconcile`. Verified idle and mid-run at 1,500 votes/s.
+
 **Done when:** Deliberately corrupting a Redis counter is detected and reported, and repair restores it.
 
 ---

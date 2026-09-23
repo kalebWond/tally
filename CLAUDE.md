@@ -51,6 +51,7 @@ TypeScript everywhere except the load generator, which is Go.
 - `packages/*` import each other with `.ts` extensions (Turbopack can't map `.js` → `.ts`); services use `.js`. A bundled workspace package's runtime deps must also be the app's deps.
 - Go (generator): `pnpm test:go` / `scripts/go.sh <go args>` use host Go if installed, otherwise the `golang:1.27-alpine` image. After changing a contract the generator speaks, run `pnpm --filter @tally/contracts export-schemas`.
 - `pnpm lint` (Biome), `pnpm typecheck`, `pnpm test` (Vitest), `pnpm check:health`.
+- `pnpm reconcile [--repair] [--contest <uuid>] [--json]` recounts from `votes` and checks every derived count (Postgres and Redis); in containers, `docker compose run --rm reconcile …`. It pauses each contest's counting briefly while it runs.
 - Every new service gets its own Dockerfile and a compose entry under the `app` profile when it's created.
 
 ---
@@ -121,8 +122,8 @@ A feature is done when its check in `IMPLEMENTATION_PLAN.md` passes, tests cover
 
 Update this section as you go.
 
-**Last completed:** F17, minute buckets and chart (2026-09-23)
-**Next up:** F18, reconciliation job (recount from `votes`, compare with `vote_totals`, `vote_buckets` and Redis, report drift, optional repair). Note: the upward-only Redis store cannot repair a count that is too high; `resyncRedis` in the consumer is a starting point. Admin pattern: page under `app/admin/`, `requireAdmin(path)`; route handlers use `lib/api.ts` (`readAdminJson`, `readQuery`, `readParam`, `isAdmin`); add API paths to the `proxy.ts` matcher and a link in `components/admin/admin-nav.tsx`. DB integration tests in web use `createTestDatabase()` from `@tally/db/testing`. shadcn: `pnpm dlx shadcn@latest add <name>` in `apps/web` (answer "no" to overwriting `button.tsx`).
+**Last completed:** F18, reconciliation job (2026-09-23)
+**Next up:** F19, load testing with k6 (steady ramp and spike profiles; throughput, p95/p99, consumer lag; a reproducible command and a results table for the README). k6 isn't installed on the host: run it in the `grafana/k6` image, like `scripts/go.sh` does for Go.
 
 **Seed contest:** `0192f3a0-7c1e-7000-8000-00000000c0de`, codes `C1`–`C10`.
 

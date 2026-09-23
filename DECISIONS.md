@@ -81,6 +81,7 @@ Where the build departs from `SPEC.md` or `IMPLEMENTATION_PLAN.md`, or pins down
 | Dead-letter API | `GET /api/dead-letters?contestId=&reason=&before=\|after=&limit=` → `{ items, older, newer }` (keyset cursors on id, newest first, limit 1–200, default 50); `GET /api/dead-letters/counts?contestId=&since=` → `{ total, byReason, latestId }`. Contracts `DeadLetterQuery` / `DeadLetterPage` / `DeadLetterCounts` | F15 |
 | Contest lifecycle | `POST /api/contests/:id/status { status: "open" \| "closed" }` → `{ contest, liveUpdated }`; allowed draft → open, open → closed, closed → open (reopen); anything else 409. Opening stamps `opens_at` and clears `closes_at`; closing stamps `closes_at` | F16 |
 | Which votes a contest counts | exactly those ingest accepted (`sent_at`) while it was open: `opens_at ≤ sent_at` and, once closed, `sent_at < closes_at`. Draft counts nothing. Null `opens_at` = open since creation. Everything else → `contest_closed` | F16 |
+| Reconciliation command | `pnpm reconcile [--repair] [--contest <uuid>] [--json]` on the host; `docker compose run --rm reconcile …` (profile `tools`, consumer image). Checks `vote_totals`, `vote_buckets`, Redis totals, `totalVotes`, minutes and `lastMinute` against a recount of `votes`. Exit 0 = no drift or all repaired, 1 = drift left, 2 = error | F18 |
 
 ### Outstanding: a rule not met yet
 
@@ -534,4 +535,16 @@ The "two clients receive identical frames" test waited for exactly six frames. F
 Headless Chrome with the results page in the foreground; a 135 s generator run at 800 votes/s, then 1,600 votes/s after 70 s. All 8 checks passed:
 - **Live:** the chart's total rose at 66 of 67 two-second samples, with no reload, across 4 minutes of buckets.
 - **Reconcile:** for every contestant, bucket sum = total = votes (**972,856 = 972,856 = 972,856**, 0 mismatched). The run's buckets = votes the generator got accepted (**162,263 = 162,263**). The chart's total = Postgres's buckets for the minutes it shows (649,740 = 649,740). Redis per minute = Postgres for every minute of the run.
+
+## F18 — Reconcile under the contest lock, repair by overwriting
+**Decided:** per contest, `reconcileContest` takes the contest row `FOR UPDATE`, the same handshake as closing (F16). In-flight batches for the contest finish first and new ones wait, so the recount of `votes` and every layer it's compared with describe one instant, with nothing in flight. Counting for the contest pauses meanwhile (291–741 ms at about 1M votes); votes wait in Redpanda and none are lost. Everything is compared: `vote_totals` and `vote_buckets` per contestant (and minute), and in Redis the totals hash (including entries for ids that aren't in the contest), `totalVotes`, the minutes hash and `lastMinute`. With `--repair`, Postgres rows are replaced and the Redis hashes overwritten, all while the lock is held, then compared again. The Redis write is a plain overwrite, not the consumer's upward-only one, so a too-high value comes down. A batch that committed just before the lock may still write Redis afterwards, but its value is committed, so it's at most the recount and its upward-only write can't disturb the repair. Contest status stays web's. A 10 s `lock_timeout` stops the job hanging behind a stuck transaction.
+**Why the lock:** without it, a batch committing mid-recount makes the comparison report drift that isn't there, and a repair can overwrite a count a batch just raised. The live-traffic test fails 3 out of 3 times with the lock removed.
+**Worth knowing:** a too-*low* Redis value heals by itself as soon as its contestant gets a vote, because live batches write absolute values upward-only. The first version of the live test planted a low value, and traffic repaired it before the reconciler ran. A too-*high* value never heals by itself; that's the case `--repair` exists for.
+**Alternatives:** a lock-free comparison confirmed on a second pass (can't repair exactly while votes flow); repairing Redis only (but `vote_totals` / `vote_buckets` are derived too, and the vote log is the only truth).
+
+## F18 — How "a corrupted Redis counter is detected, reported and repaired" was verified
+On the running stack, with a results page open. 13 of 13 checks passed:
+- **Idle:** C1 set to 5 (truth 126,074) and C2 set 12,345 too high. The open page showed the bad C1. `pnpm reconcile` exited 1 with `redis_totals C1 126,074 5` and `redis_totals C2 83,915 96,260`. `--repair` exited 0, Redis went back to the recount, and the open page showed the true counts again without a reload. A second check found no drift.
+- **Mid-run at 1,500 votes/s:** C3 and `totalVotes` set to 99,999,999 survived 2 s of live traffic. `docker compose run --rm reconcile --repair` found and fixed both, with counting paused 741 ms. After the run, no drift in any layer (993,029 votes), and 0 votes rejected or failed.
+- **Before any corruption,** a first check on the real dev data (972,856 votes) found no drift.
 
