@@ -2,6 +2,7 @@ import { Consumer, type Message, stringDeserializers } from '@platformatic/kafka
 import type { Db } from '@tally/db';
 import type { Redis } from 'ioredis';
 import type { Logger } from 'pino';
+import { createDeadLetterPublisher } from './dead-letter-publisher.js';
 import { processBatch } from './process.js';
 import { createResolver } from './resolver.js';
 import { createTotalsStore } from './totals-store.js';
@@ -9,6 +10,8 @@ import { createTotalsStore } from './totals-store.js';
 interface VoteConsumerOptions {
   brokers: string[];
   topic: string;
+  /** Where unresolvable votes are published (votes.dead). */
+  deadTopic: string;
   groupId: string;
   db: Db;
   redis: Redis;
@@ -24,9 +27,9 @@ type VoteMessage = Message<string, string, string, string>;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
- * At-least-once: offsets are committed only after a batch is in Postgres and Redis. A batch that
- * fails is retried, never skipped; a failed commit only means redelivery, which processBatch
- * absorbs because it is idempotent.
+ * At-least-once: offsets are committed only after a batch is in Postgres, its dead letters are on
+ * votes.dead, and Redis is updated. A batch that fails is retried, never skipped; a failed commit
+ * only means redelivery, which processBatch absorbs because it is idempotent.
  */
 export function createVoteConsumer(opts: VoteConsumerOptions) {
   const { topic, db, redis, log, maxBatch = 500, maxWaitMs = 100 } = opts;
@@ -37,7 +40,13 @@ export function createVoteConsumer(opts: VoteConsumerOptions) {
     deserializers: stringDeserializers,
     connectTimeout: 1000,
   });
-  const deps = { db, resolver: createResolver(db), totals: createTotalsStore(redis) };
+  const deadLetters = createDeadLetterPublisher({ brokers: opts.brokers, topic: opts.deadTopic });
+  const deps = {
+    db,
+    resolver: createResolver(db),
+    totals: createTotalsStore(redis),
+    deadLetters,
+  };
 
   const stats = { processed: 0, counted: 0, duplicates: 0, dead: 0, batches: 0 };
   let buffer: VoteMessage[] = [];
@@ -58,7 +67,7 @@ export function createVoteConsumer(opts: VoteConsumerOptions) {
       try {
         return await processBatch(inbound, deps);
       } catch (err) {
-        // Postgres or Redis unavailable: hold position and retry. Moving on would let a later
+        // Postgres, Redis or the broker unavailable: hold position and retry. Moving on would let a later
         // commit skip these votes.
         log.error({ err, attempt, size: batch.length }, 'batch failed, retrying');
         if (stopping) return undefined;
@@ -134,6 +143,7 @@ export function createVoteConsumer(opts: VoteConsumerOptions) {
       await loop;
       await flush();
       await consumer.close(true);
+      await deadLetters.close();
     },
 
     /** True when the broker answers now and the topic exists. */

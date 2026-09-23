@@ -23,6 +23,7 @@ Where the build departs from `SPEC.md` or `IMPLEMENTATION_PLAN.md`, or pins down
 | Redis sync (SPEC §5 keys, plan F5) | "increment the Redis counter"; `tally:idem:{key}` string, 1 h TTL, as a redelivery guard | Redis is **set** to absolute totals read back from Postgres (upward only, via Lua). No `tally:idem:*` keys: Postgres's unique `idempotency_key` is the only dedupe | F5 |
 | Unresolvable votes (plan F6, SPEC §5 `contestant_id` null = unresolved) | dead-lettering is F6; unresolved votes could sit in `votes` with a null contestant | F5 writes them to `dead_letters` (`unknown_code` / `malformed`); `votes.contestant_id` is never null in practice. F6 adds publishing to `votes.dead` | F5 |
 | `dead_letters` columns (SPEC §5) | id, raw payload, reason, received_at | plus a unique, nullable `idempotency_key` (the vote's key, or `offset:topic/partition/offset`) so replays don't duplicate dead letters | F5 |
+| `votes.dead` message shape (SPEC §6) | "the original payload plus `reason` and `failed_at`" | envelope `{ v: 1, reason, failed_at, idempotency_key, original }`; `original` is the parsed JSON, or `{ raw }` for non-JSON | F6 |
 
 ### Filled in: the document was silent, and the choice is now part of a contract
 
@@ -42,6 +43,7 @@ Where the build departs from `SPEC.md` or `IMPLEMENTATION_PLAN.md`, or pins down
 | `votes.received_at` | the event's `sent_at` (when ingest accepted the vote), not the processing time, so replays and minute buckets are deterministic | F5 |
 | Unknown contest | dead-lettered as `unknown_code` (the code can't resolve in that contest); no new reason value | F5 |
 | Consumer group | `tally-consumer`; new groups start at `earliest`; batches of 500 or 100 ms; offsets committed after both stores | F5 |
+| `votes.dead` delivery | at-least-once: every dead letter in a batch is (re)published after the commit, so a redelivery or replay duplicates it with the same `idempotency_key` and `failed_at`; readers dedupe on the key. Keyed by the original `code` when there is one | F6 |
 
 ### Outstanding: a rule not met yet
 
@@ -209,3 +211,16 @@ Where the build departs from `SPEC.md` or `IMPLEMENTATION_PLAN.md`, or pins down
 ## F5 — Bundling gotcha: a workspace package's dependencies belong to the service
 
 **Found live, not in tests:** the consumer image crash-looped with `Dynamic require of "events" is not supported`. tsup bundles `@tally/*` (they ship TS source), and `@tally/db` imports `pg`. The consumer listed `pg` only as a devDependency, so tsup inlined it as well, and CommonJS `pg` breaks when inlined into an ESM bundle. Fix: every runtime dependency of a bundled workspace package must also be a runtime dependency of the service. Noted in each `tsup.config.ts`. Tests run unbundled, so only the container caught it.
+
+## F6 — `votes.dead` mirrors `dead_letters`, published at-least-once after the commit
+
+**Decided:** after each batch's Postgres commit, the consumer reads back that batch's `dead_letters` rows, including ones an earlier delivery already wrote, and publishes every one to `votes.dead` (acks=all, idempotent producer, 5 s cap), then updates Redis. Offsets are committed only after both. A failed publish retries the whole batch.
+**Alternatives:** publish only newly inserted rows (no duplicates on the topic, but a crash between commit and publish leaves a dead letter in the table that never reaches the topic); publish inside the transaction (network I/O while holding row locks, and it still duplicates if the commit fails after the publish).
+**Why:** the same heal-on-redelivery pattern as Redis in F5, so the topic can't permanently miss a row the table has. The cost is at-least-once on `votes.dead`: a redelivered or replayed batch republishes, with the same `idempotency_key` and `failed_at`, so readers dedupe on the key. Building messages from the read-back rows is what keeps `failed_at` stable and the topic identical to the table.
+**Tested:** unit tests cover content, heal after a crash before the publish, and a stable `failed_at` on republish. End to end through Redpanda: unknown code, unknown contest and a malformed message all reach the topic, 3 valid votes count 3, and the table holds 3 dead letters. Live: `ZZ9` via ingest → 202 → `votes.dead` (key `ZZ9`, reason `unknown_code`), with totals unchanged at 232.
+
+## F6 — Dead-letter message is an envelope
+
+**Decided:** `{ v: 1, reason, failed_at, idempotency_key, original }` (`DeadLetterEvent` in contracts). `original` is the message as received: the parsed JSON, or `{ raw }` if it wasn't JSON. Messages are keyed by the original `code` when there is one; malformed messages are keyless and spread across partitions.
+**Alternatives:** the spec's literal "original payload plus reason and failed_at", flattened into one object.
+**Why:** a malformed message has no fields to flatten, and flattening lets the original's fields collide with the added ones. One schema covers every reason. Keying by code keeps a contestant's dead letters ordered, like `votes.raw`.

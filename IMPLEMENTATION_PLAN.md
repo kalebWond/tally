@@ -65,7 +65,7 @@ Build one feature per session. Each has a goal, a build list, and a check that d
 
 **Build:** Unresolvable codes go to `votes.dead` with a reason, and are mirrored into the `dead_letters` table.
 
-*Changed (F4, F5):* the `votes.dead` topic already exists (F4 `topics` job), and the consumer already writes `dead_letters` with reasons, idempotently (F5). F6 remains: publish each dead letter to `votes.dead` with `reason` and `failed_at`, and prove it end to end.
+*Changed (F4, F5):* the `votes.dead` topic already exists (F4 `topics` job), and the consumer already writes `dead_letters` with reasons, idempotently (F5). F6 remains: publish each dead letter to `votes.dead` with `reason` and `failed_at`, and prove it end to end. *Done (F6):* published as an envelope (`DeadLetterEvent`), at-least-once, read back from the table so topic and table match.
 
 **Done when:** A vote for a nonexistent code lands in the dead-letter topic with a reason and does not affect any total.
 

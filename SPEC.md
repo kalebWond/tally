@@ -180,6 +180,8 @@ Topic `votes.raw`, partitioned by `code` so all votes for one contestant stay or
 
 Topic `votes.dead` carries the original payload plus `reason` (`unknown_code`, `contest_closed`, `malformed`) and `failed_at`.
 
+*Changed (F6):* the message is an envelope, `{ "v": 1, "reason", "failed_at", "idempotency_key", "original" }`, where `original` is the message as received (the parsed JSON, or `{ "raw": "…" }` if it wasn't JSON). Delivery is at-least-once: a redelivered or replayed batch republishes its dead letters with the same `idempotency_key` and `failed_at`. Keyed by the original `code` when present.
+
 All schemas are defined once as Zod schemas in `packages/contracts` and imported by every TypeScript service. The Go generator has a matching struct, kept in sync manually and covered by a contract test.
 
 ---

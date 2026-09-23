@@ -17,6 +17,7 @@ const redis = new Redis(config.REDIS_URL, { maxRetriesPerRequest: 3 });
 const consumer = createVoteConsumer({
   brokers: config.KAFKA_BROKERS,
   topic: TOPICS.raw,
+  deadTopic: TOPICS.dead,
   groupId: GROUP_ID,
   db,
   redis,

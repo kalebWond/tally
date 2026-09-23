@@ -1,6 +1,7 @@
-import { type DeadLetterReason, VoteEvent } from '@tally/contracts';
+import { type DeadLetterEvent, type DeadLetterReason, VoteEvent } from '@tally/contracts';
 import { type Db, schema } from '@tally/db';
 import { inArray, sql } from 'drizzle-orm';
+import type { DeadLetterPublisher } from './dead-letter-publisher.js';
 import type { Resolver } from './resolver.js';
 import type { ContestTotals, TotalsStore } from './totals-store.js';
 
@@ -16,7 +17,7 @@ export interface BatchResult {
   counted: number;
   /** Already seen (same idempotency key): redelivery, replay, or a client retry. */
   duplicates: number;
-  /** Written to dead_letters instead of being counted. */
+  /** Written to dead_letters and published to votes.dead instead of being counted. */
   dead: number;
 }
 
@@ -24,6 +25,7 @@ interface Deps {
   db: Db;
   resolver: Resolver;
   totals: TotalsStore;
+  deadLetters: DeadLetterPublisher;
 }
 
 type NewVote = typeof schema.votes.$inferInsert;
@@ -55,6 +57,10 @@ const isDeadLetter = (x: VoteEvent | NewDeadLetter): x is NewDeadLetter => 'reas
  * Idempotent: processing the same messages any number of times leaves every total unchanged.
  * Postgres is the only dedupe (unique idempotency_key); Redis receives absolute totals read back
  * from Postgres, so a crash between the commit and the Redis write heals on redelivery.
+ *
+ * Dead letters follow the same pattern: the rows are read back and every one in the batch is
+ * published to votes.dead after the commit, so a crash before the publish heals too. The cost is
+ * at-least-once on the topic: a redelivered batch republishes (same key, same failed_at).
  */
 export async function processBatch(messages: InboundMessage[], deps: Deps): Promise<BatchResult> {
   const votes: NewVote[] = [];
@@ -91,7 +97,7 @@ export async function processBatch(messages: InboundMessage[], deps: Deps): Prom
     });
   }
 
-  const { counted, updates } = await deps.db.transaction(async (tx) => {
+  const { counted, updates, deadEvents } = await deps.db.transaction(async (tx) => {
     const inserted = votes.length
       ? await tx
           .insert(schema.votes)
@@ -117,11 +123,30 @@ export async function processBatch(messages: InboundMessage[], deps: Deps): Prom
         });
     }
 
+    let deadEvents: DeadLetterEvent[] = [];
     if (dead.length) {
       await tx
         .insert(schema.deadLetters)
         .values(dead)
         .onConflictDoNothing({ target: schema.deadLetters.idempotencyKey });
+      // Read back, not the in-memory copies: an earlier delivery may already have written the
+      // row, and the topic must carry the same failed_at as the table.
+      const rows = await tx
+        .select()
+        .from(schema.deadLetters)
+        .where(
+          inArray(
+            schema.deadLetters.idempotencyKey,
+            dead.map((d) => d.idempotencyKey as string),
+          ),
+        );
+      deadEvents = rows.map((r) => ({
+        v: 1,
+        reason: r.reason,
+        failed_at: r.receivedAt.toISOString(),
+        idempotency_key: r.idempotencyKey as string,
+        original: r.payload,
+      }));
     }
 
     // Absolute totals for every contestant this batch touched, duplicates included: a pure
@@ -130,9 +155,12 @@ export async function processBatch(messages: InboundMessage[], deps: Deps): Prom
     return {
       counted: inserted.length,
       updates: touched.length ? await readTotals(tx, touched) : [],
+      deadEvents,
     };
   });
 
+  // Both must succeed before the caller commits offsets; either failing means redelivery.
+  await deps.deadLetters.publish(deadEvents);
   await deps.totals.apply(updates);
 
   return { counted, duplicates: duplicates + (votes.length - counted), dead: dead.length };

@@ -1,4 +1,4 @@
-import { redisKeys, type VoteEvent } from '@tally/contracts';
+import { DeadLetterEvent, redisKeys, type VoteEvent } from '@tally/contracts';
 import { schema } from '@tally/db';
 import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -7,7 +7,8 @@ import { createResolver } from './resolver.js';
 import { CODES, CONTEST_ID, createTestStores, voteEvent } from './test-support.js';
 import { createTotalsStore } from './totals-store.js';
 
-// Core of F5: idempotent aggregation into Postgres (truth) and Redis (speed).
+// Core of F5/F6: idempotent aggregation into Postgres (truth) and Redis (speed), and
+// dead letters mirrored to votes.dead.
 
 let stores: Awaited<ReturnType<typeof createTestStores>>;
 let offset = 0n;
@@ -20,10 +21,17 @@ const asMessages = (payloads: (VoteEvent | string)[]): InboundMessage[] =>
     value: typeof p === 'string' ? p : JSON.stringify(p),
   }));
 
+let deadPublished: DeadLetterEvent[];
+
 const deps = () => ({
   db: stores.db,
   resolver: createResolver(stores.db),
   totals: createTotalsStore(stores.redis),
+  deadLetters: {
+    publish: async (events: DeadLetterEvent[]) => {
+      deadPublished.push(...events);
+    },
+  },
 });
 
 async function snapshot() {
@@ -55,6 +63,7 @@ afterAll(async () => {
 beforeEach(async () => {
   await stores.db.execute(sql`truncate votes, vote_totals, dead_letters`);
   await stores.redis.flushdb();
+  deadPublished = [];
 });
 
 describe('processBatch', () => {
@@ -160,5 +169,52 @@ describe('processBatch', () => {
     await processBatch(batch, deps());
 
     expect((await snapshot()).dead).toBe(2);
+  });
+});
+
+describe('processBatch — votes.dead (F6)', () => {
+  it('publishes each dead letter with its reason, failed_at and original payload; totals untouched', async () => {
+    const unknown = voteEvent('ZZ9');
+    await processBatch(asMessages([voteEvent('C2'), unknown, 'not json at all']), deps());
+
+    expect(deadPublished).toHaveLength(2);
+    for (const e of deadPublished) DeadLetterEvent.parse(e);
+    const byReason = Object.fromEntries(deadPublished.map((e) => [e.reason, e]));
+    expect(byReason.unknown_code).toMatchObject({
+      idempotency_key: unknown.idempotency_key,
+      original: unknown,
+    });
+    expect(byReason.malformed?.original).toEqual({ raw: 'not json at all' });
+    expect((await snapshot()).total).toBe(1);
+  });
+
+  it('heals when a crash hit between the Postgres commit and the publish', async () => {
+    const batch = asMessages([voteEvent('ZZ9'), voteEvent('C1')]);
+    const crashing = {
+      ...deps(),
+      deadLetters: { publish: async () => Promise.reject(new Error('broker down')) },
+    };
+
+    await expect(processBatch(batch, crashing)).rejects.toThrow('broker down');
+    expect((await snapshot()).dead).toBe(1); // in the table, not yet on the topic
+    expect(deadPublished).toHaveLength(0);
+
+    await processBatch(batch, deps()); // redelivery
+
+    expect(deadPublished).toHaveLength(1);
+    expect(await snapshot()).toMatchObject({ dead: 1, total: 1, redisSum: 1 });
+  });
+
+  it('republishes on redelivery (at-least-once) with the same key and a stable failed_at', async () => {
+    const batch = asMessages([voteEvent('ZZ9')]);
+    await processBatch(batch, deps());
+    await new Promise((r) => setTimeout(r, 20));
+    await processBatch(batch, deps());
+
+    expect(deadPublished).toHaveLength(2);
+    const [first, second] = deadPublished;
+    expect(second?.idempotency_key).toBe(first?.idempotency_key);
+    expect(second?.failed_at).toBe(first?.failed_at);
+    expect((await snapshot()).dead).toBe(1);
   });
 });

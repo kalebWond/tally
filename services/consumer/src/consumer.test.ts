@@ -14,6 +14,7 @@ const brokersEnv = process.env.KAFKA_BROKERS;
 if (!brokersEnv) throw new Error('KAFKA_BROKERS must be set (see .env.example)');
 const brokers = brokersEnv.split(',');
 const topic = `test.votes.${randomUUID().slice(0, 8)}`;
+const deadTopic = `${topic}.dead`;
 const log = pino({ level: 'silent' });
 
 let stores: Awaited<ReturnType<typeof createTestStores>>;
@@ -41,7 +42,7 @@ async function until(check: () => Promise<boolean> | boolean, timeoutMs = 30_000
 
 beforeAll(async () => {
   stores = await createTestStores();
-  await admin.createTopics({ topics: [topic], partitions: 6, replicas: 1 });
+  await admin.createTopics({ topics: [topic, deadTopic], partitions: 6, replicas: 1 });
 
   const producer = new Producer({
     clientId: 'consumer-test-producer',
@@ -61,7 +62,7 @@ beforeAll(async () => {
 }, 60_000);
 
 afterAll(async () => {
-  await admin.deleteTopics({ topics: [topic] });
+  await admin.deleteTopics({ topics: [topic, deadTopic] });
   await admin.close();
   await stores?.cleanup();
 });
@@ -70,6 +71,7 @@ const start = (groupId: string) =>
   createVoteConsumer({
     brokers,
     topic,
+    deadTopic,
     groupId,
     db: stores.db,
     redis: stores.redis,
