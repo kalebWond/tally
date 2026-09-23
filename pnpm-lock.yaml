@@ -23,6 +23,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@clickhouse/client':
+        specifier: ^1.23.1
+        version: 1.23.1
       '@tally/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts

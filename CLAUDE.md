@@ -124,11 +124,11 @@ A feature is done when its check in `IMPLEMENTATION_PLAN.md` passes, tests cover
 
 Update this section as you go.
 
-**Last completed:** F21, ClickHouse schema (2026-09-24)
-**Next up:** F22, analytics page: turnout over time, lead-change history, breakdown by source, all served from ClickHouse (web needs a ClickHouse client; no Postgres for those charts). The counted-per-minute query is in DECISIONS (F21).
+**Last completed:** F22, analytics page (2026-09-24)
+**Next up:** F23, metrics and dashboards (see `IMPLEMENTATION_PLAN.md`).
 
 **Seed contest:** `0192f3a0-7c1e-7000-8000-00000000c0de`, codes `C1`–`C10`.
 
-**Operator pages:** `/control` (generator panel), `/admin/contests` (open/close/reopen), `/admin/contestants` and `/admin/dead-letters`, behind `ADMIN_PASSWORD` from `.env`. Contestant codes are fixed once created; deactivate instead of deleting. Checks that close the seed contest must reopen it. Web now talks to Redis for one thing: the contest status in the meta hash. The consumer rebuilds Redis totals and minutes from Postgres every time it starts.
+**Operator pages:** `/control` (generator panel), `/admin/contests` (open/close/reopen), `/admin/contestants`, `/admin/dead-letters` and `/admin/analytics` (ClickHouse only), behind `ADMIN_PASSWORD` from `.env`. Contestant codes are fixed once created; deactivate instead of deleting. Checks that close the seed contest must reopen it. Web now talks to Redis for one thing: the contest status in the meta hash. The consumer rebuilds Redis totals and minutes from Postgres every time it starts.
 
 **Known gaps:** Go isn't installed on the dev machine; `scripts/go.sh` runs it in a container.

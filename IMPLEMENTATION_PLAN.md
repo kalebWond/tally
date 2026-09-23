@@ -229,6 +229,8 @@ Build one feature per session. Each has a goal, a build list, and a check that d
 
 **Build:** Turnout over time, lead-change history, breakdown by source.
 
+*Decided (F22):* `/admin/analytics` (operator) with turnout, lead-change history and source/reason breakdowns from `GET /api/analytics/:contestId` (ClickHouse only); Postgres supplies labels and is optional. Verified with Postgres stopped.
+
 **Done when:** Every chart is served from ClickHouse and none of them touch Postgres.
 
 ---

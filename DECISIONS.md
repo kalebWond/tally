@@ -85,6 +85,7 @@ Where the build departs from `SPEC.md` or `IMPLEMENTATION_PLAN.md`, or pins down
 | Load test | `pnpm load <smoke\|steady\|spike>`: k6 (`grafana/k6:2.3.0`, `tools/load/votes.js`, open model) in the compose network against `ingest:4000`; steady = ramp to 1,000/s, hold 3 min; spike = 500/s → 3,000/s for 1 min → 500/s. Reports in `load-results/*.md` (raw JSON/CSV gitignored); results published in README | F19 |
 | Analytics pipeline | `services/analytics-consumer` (port 4004), consumer group `tally-analytics`, reads **both** `votes.raw` and `votes.dead` into ClickHouse `votes_raw` / `votes_dead`; ClickHouse 26.9 in the default compose profile (port 8123, user/db `tally`); schema created at startup. `HealthResponse` gained optional `clickhouse` | F20 |
 | ClickHouse schema | versioned migrations in `services/analytics-consumer/src/schema.ts` (`_migrations` table, applied at startup); `votes_raw` ORDER BY `(contest_id, sent_at, idempotency_key)`; both tables gain `key_hash UInt64 MATERIALIZED cityHash64(idempotency_key)`; `votes_dead.sent_at` = the original vote's; readers count votes as `uniqExact(key_hash)`, counted = accepted − rejected per minute | F21 |
+| Analytics page | `/admin/analytics?contest=` (operator, password-protected), data from `GET /api/analytics/:contestId`, ClickHouse only; refreshes every 15 s. Counted = distinct raw keys not in the contest's dead letters | F22 |
 
 ### Outstanding: a rule not met yet
 
@@ -594,4 +595,22 @@ Generator at 1,000 votes/s with a results page open; the live path sampled every
 - **Counted per minute (accepted − rejected):** 330 ms. **Per minute per contestant** (lead changes): 393 ms. **By source:** 408 ms.
 - **Last 30 minutes:** **56 ms**, reading 1.7M rows; the sort key limits it to the range.
 - **Correct, not just fast:** on the live contest, ClickHouse's counted-per-minute equals Postgres's `vote_buckets` in all 83 minutes (**3,152,708 = 3,152,708**, 0 mismatched), computed without asking Postgres.
+
+## F22 — Analytics page: ClickHouse for every number, Postgres for labels only
+**Decided:** an operator page, `/admin/analytics`, behind the admin password like the other operator pages (SPEC lists no public analytics surface). All chart data comes from one route, `GET /api/analytics/:contestId` (`lib/analytics.ts`), which talks only to ClickHouse:
+- **Turnout:** counted and rejected votes in buckets sized to the contest's span (1–1,440 minutes, at most about 120 bars; 5 minutes for the 6-hour seed contest).
+- **Lead-change history:** cumulative lines for the top five, a dashed line at each change of leader, and a table of changes with margins.
+- **Breakdown:** counted votes by source, rejected by reason.
+
+"Counted" is distinct raw keys not among the contest's dead letters, and it equals the live Postgres total (3,152,708 = 3,152,708). Lead changes are computed minute by minute from per-code counts (`lib/lead-changes.ts`, tested). A tie doesn't pass the lead, so an incumbent keeps it until someone is strictly ahead. The page takes contest and contestant *names* from Postgres, but only as labels: with Postgres down it says so, labels by code, and picks the contest with the latest votes from ClickHouse. Web's pool now gives up connecting after 2 s (`createDb` gained `connectionTimeoutMillis`), so an outage costs the page 2 s, not an indefinite wait.
+**Why this way:** "none of them touch Postgres" is only worth claiming if it survives Postgres being gone, and the check tests exactly that.
+
+## F22 — Found: the proxy never covered `/api/contests`
+F16's edit to the proxy matcher was a find-and-replace on the one-line form. The formatter had already split the matcher over several lines, so the replace matched nothing. `/api/contests/:id/status` stayed protected, because every handler also checks the session (F16's check got a 401 without one), but the first filter was missing. Fixed, and `lib/proxy-coverage.test.ts` now fails if any `app/api/*` area is missing from the matcher. Mutation-checked: deleting the entry fails the test.
+
+## F22 — How "every chart is served from ClickHouse and none of them touch Postgres" was verified
+Headless Chrome on the containerised stack. 9 of 9 checks passed:
+- **Content:** the turnout, history and source charts render. Counted (ClickHouse) **3,152,708** = the live total (Postgres). 9 lead changes listed, the latest to C3. Sources: sms 1,792,029, generator 1,359,796, web 883.
+- **Live:** during a 30 s run at 500 votes/s, the counted tile rose by exactly the run's 15,009 accepted votes on its own refresh, with no reload.
+- **Postgres stopped:** `GET /api/analytics/:id` still answered 200 with every chart's data (3,182,726 counted, 34 turnout buckets, 533 ms from ClickHouse). The page, reloaded without a contest in the URL, rendered all its charts, labelled by code, and said Postgres was unreachable. The first run of this check failed exactly there: without a contest in the URL, the page needed Postgres to pick one. That's what the ClickHouse fallback fixed.
 

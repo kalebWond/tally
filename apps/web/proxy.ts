@@ -26,5 +26,7 @@ export const config = {
     '/api/generator/:path*',
     '/api/contestants/:path*',
     '/api/dead-letters/:path*',
+    '/api/contests/:path*',
+    '/api/analytics/:path*',
   ],
 };

@@ -7,6 +7,7 @@ const LINKS = [
   { href: '/admin/contests', label: 'Contests' },
   { href: '/admin/contestants', label: 'Contestants' },
   { href: '/admin/dead-letters', label: 'Dead letters' },
+  { href: '/admin/analytics', label: 'Analytics' },
 ] as const;
 
 /** Top bar shared by the operator pages. */

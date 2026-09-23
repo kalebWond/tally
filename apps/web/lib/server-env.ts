@@ -17,3 +17,14 @@ export const generatorUrl = () => z.url().parse(process.env.GENERATOR_URL);
 
 /** Redis, for web's one write: a contest's status in the live meta hash (F16). */
 export const redisUrl = () => z.url().parse(process.env.REDIS_URL);
+
+/** ClickHouse, for the analytics page (F22). Never used by the results or admin pages. */
+export const clickhouseEnv = () =>
+  z
+    .object({
+      CLICKHOUSE_URL: z.url(),
+      CLICKHOUSE_USER: z.string().min(1).default('tally'),
+      CLICKHOUSE_PASSWORD: z.string().default(''),
+      CLICKHOUSE_DB: z.string().min(1).default('tally'),
+    })
+    .parse(process.env);

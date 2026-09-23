@@ -10,6 +10,7 @@
     "typecheck": "next typegen && tsc -p ."
   },
   "dependencies": {
+    "@clickhouse/client": "^1.23.1",
     "@tally/contracts": "workspace:*",
     "@tally/db": "workspace:*",
     "class-variance-authority": "^0.7.1",

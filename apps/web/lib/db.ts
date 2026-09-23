@@ -6,6 +6,7 @@ import { serverEnv } from './server-env';
 const cache = globalThis as unknown as { tallyDb?: Db };
 
 export function db(): Db {
-  cache.tallyDb ??= createDb(serverEnv().DATABASE_URL).db;
+  // Fail fast when Postgres is down: pages that can do without it (analytics labels) move on.
+  cache.tallyDb ??= createDb(serverEnv().DATABASE_URL, { connectionTimeoutMillis: 2000 }).db;
   return cache.tallyDb;
 }

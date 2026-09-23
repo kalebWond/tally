@@ -67,6 +67,8 @@ The analytics consumer runs in a **separate consumer group**, so it reads the sa
 
 *Decided (F21):* tables `votes_raw` (sorted by contest, time) and `votes_dead` (each rejection carries its vote's `sent_at`); votes are counted as `uniqExact(key_hash)`; counted = accepted − rejected. No rollup tables.
 
+*Decided (F22):* the analytics page is an operator page (`/admin/analytics`), fed by `GET /api/analytics/:contestId` from ClickHouse alone; it keeps working with Postgres down.
+
 ### Design principles
 
 1. **The ingest path stays thin.** Validate shape, hash the sender, publish. No database access on the hot path.
