@@ -1,6 +1,6 @@
-import { createDb } from '../client.js';
-import { loadEnv } from '../env.js';
-import { SEED_CONTEST_ID, seed } from '../seed.js';
+import { createDb } from '../client.ts';
+import { loadEnv } from '../env.ts';
+import { SEED_CONTEST_ID, seed } from '../seed.ts';
 
 const { db, close } = createDb(loadEnv().DATABASE_URL);
 try {

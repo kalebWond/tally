@@ -1,6 +1,6 @@
-import { createDb } from '../client.js';
-import { loadEnv } from '../env.js';
-import { migrate } from '../migrate.js';
+import { createDb } from '../client.ts';
+import { loadEnv } from '../env.ts';
+import { migrate } from '../migrate.ts';
 
 const { db, close } = createDb(loadEnv().DATABASE_URL);
 try {

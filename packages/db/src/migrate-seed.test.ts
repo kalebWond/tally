@@ -2,10 +2,10 @@ import { randomBytes } from 'node:crypto';
 import { eq, sql } from 'drizzle-orm';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createDb, type Db } from './client.js';
-import { migrate } from './migrate.js';
-import { contestants, contests, votes, voteTotals } from './schema.js';
-import { SEED_CONTEST_ID, seed } from './seed.js';
+import { createDb, type Db } from './client.ts';
+import { migrate } from './migrate.ts';
+import { contestants, contests, votes, voteTotals } from './schema.ts';
+import { SEED_CONTEST_ID, seed } from './seed.ts';
 
 // F2 done-when: migrations run from empty, the seed populates, re-running the seed is safe.
 // Runs against a throwaway database on the local Postgres (DATABASE_URL).

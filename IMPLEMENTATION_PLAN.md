@@ -85,6 +85,8 @@ Build one feature per session. Each has a goal, a build list, and a check that d
 
 **Build:** Results page. Connect to the gateway. Render rows sorted by count, one component per contestant. No animation yet.
 
+*Decided (F8):* `/results/[contestId]` (+ `/` redirect); contestant details from Postgres server-side, totals from `/live`; gateway URL is runtime config; broadcast-scoreboard look; shadcn/ui deferred to F13/F14.
+
 **Done when:** Totals update live on screen as votes arrive.
 
 ---

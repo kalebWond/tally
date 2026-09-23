@@ -1,5 +1,5 @@
-import type { Db } from './client.js';
-import { contestants, contests } from './schema.js';
+import type { Db } from './client.ts';
+import { contestants, contests } from './schema.ts';
 
 /** Fixed so the generator, gateway and web have a known contest to target. */
 export const SEED_CONTEST_ID = '0192f3a0-7c1e-7000-8000-00000000c0de';

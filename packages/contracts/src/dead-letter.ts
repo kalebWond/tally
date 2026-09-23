@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { DeadLetterReason } from './enums.js';
+import { DeadLetterReason } from './enums.ts';
 
 /**
  * Event on `votes.dead` (SPEC §6), mirrored row for row in the `dead_letters` table.

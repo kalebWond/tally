@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { VoteSource } from './enums.js';
+import { VoteSource } from './enums.ts';
 
 /** `POST /votes` body. `code` is normalised here so every consumer sees one canonical form. */
 export const VoteRequest = z.object({

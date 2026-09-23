@@ -1,6 +1,14 @@
 import type { Metadata } from 'next';
+import { Barlow, Barlow_Condensed } from 'next/font/google';
 import type { ReactNode } from 'react';
 import './globals.css';
+
+const display = Barlow_Condensed({
+  subsets: ['latin'],
+  weight: ['600', '700'],
+  variable: '--font-display',
+});
+const body = Barlow({ subsets: ['latin'], weight: ['400', '500', '600'], variable: '--font-body' });
 
 export const metadata: Metadata = {
   title: 'Tally',
@@ -9,8 +17,8 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
-      <body className="min-h-dvh bg-neutral-950 text-neutral-100 antialiased">{children}</body>
+    <html lang="en" className={`${display.variable} ${body.variable}`}>
+      <body>{children}</body>
     </html>
   );
 }

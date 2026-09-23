@@ -49,6 +49,10 @@ Where the build departs from `SPEC.md` or `IMPLEMENTATION_PLAN.md`, or pins down
 | Gateway close codes | `4400` invalid `contestId`, `1001` shutdown, `1011` first read failed; ping every 30 s | F7 |
 | Contestant metadata for the UI | loaded by the web app from Postgres and merged by ID; the gateway stays Redis-only | F7 |
 | Gateway `/debug` | bare, unauthenticated inspector page for the live protocol (public data only) | F7 |
+| Results routes | `/results/[contestId]`; `/` redirects to the most recently opened open contest (404 if none) | F8 |
+| Web runtime config | `GATEWAY_PUBLIC_URL` (the gateway as the browser sees it) read per request and passed from the server component; no `NEXT_PUBLIC_*`, so images aren't tied to one host | F8 |
+| Ranking | total desc, ties by code in natural order, competition ranks (1, 2, 2, 4) | F8 |
+| shadcn/ui timing (stack lists it) | deferred to F13/F14, where forms need it; the results list is custom | F8 |
 
 ### Outstanding: a rule not met yet
 
@@ -249,3 +253,30 @@ Where the build departs from `SPEC.md` or `IMPLEMENTATION_PLAN.md`, or pins down
 **Decided:** `4400` when `contestId` is missing or not a UUID (reconnecting won't help); `1001` on shutdown (reconnect with backoff, F11); `1011` if the first Redis read fails. Validation happens *after* the upgrade so the browser receives the code. Ping every 30 s and terminate connections that don't answer. `GET /debug` serves a bare inspector page, unauthenticated since the totals are public, for watching frames in two tabs until F8 exists.
 **Testing note:** the gateway's tests use Redis logical DB 14, because the consumer's tests flush DB 15 and Vitest runs packages in parallel.
 **Limit:** if Redis is wiped, deleted keys produce no diff, so viewers keep their last values until F18 rebuilds Redis.
+
+## F8 — Results page: server loads who, the browser streams how many
+
+**Decided:** `/results/[contestId]` is a server component that reads the contest and its contestants (name, code, avatar, accents, country) from Postgres. A client component subscribes to the gateway (`useLiveTotals`) and merges totals by contestant ID. `/` redirects to the most recently opened open contest. Frames naming an unknown ID (a contestant added after load) trigger `router.refresh()`, at most once per 5 s, which re-runs the server component while client state survives. Totals show `–`, not `0`, until the first snapshot.
+**Why:** it keeps the gateway Redis-only (F7). Merge and rank are pure functions (`lib/standings.ts`) with unit tests, and the refresh path needs no extra API.
+**Verified in real Chrome** (DevTools protocol): the page loaded `Live` at 252 votes, 40 votes for C9 via ingest moved it from 9th to 1st at 63, and there were no reloads. A contestant inserted after load appeared on its first vote, also without a reload.
+
+## F8 — Gateway URL is runtime config passed from the server
+
+**Decided:** the server component reads `GATEWAY_PUBLIC_URL` after `await connection()` and passes it as a prop. No `NEXT_PUBLIC_*`.
+**Why:** Next inlines `NEXT_PUBLIC_*` at build time, so changing the gateway host would mean rebuilding the image. That breaks "config from the environment" and F26's "deploy by configuration only". The value is the gateway as the *browser* sees it, so Compose sets `ws://localhost:4001` even for the containerised web app.
+
+## F8 — Ranking rules
+
+**Decided:** sort by total, highest first. Ties break on code in natural order (`C2` before `C10`, via `Intl.Collator` numeric), and tied totals share a competition rank (1, 2, 2, 4). Rows are keyed by contestant ID.
+**Why:** a deterministic tiebreak stops equal rows swapping between frames (the thing F10 must never animate). Stable ID keys are what F10's layout animation and F24's card grid depend on.
+
+## F8 — Look: broadcast scoreboard
+
+**Decided:** a single dark theme built for a projector or a screen recording. Barlow Condensed for display and tabular numbers, Barlow for body text. Each row is edged with the contestant's accent gradient, and the leader row picks up its accent. A pulsing `LIVE` status. shadcn/ui is deferred to F13/F14, where forms need it; the results list is custom display.
+
+## F8 — Shared packages import with `.ts` extensions
+
+**Found in the web image build:** Turbopack, the default bundler in Next 16, couldn't resolve `./client.js`-style imports inside `@tally/contracts` and `@tally/db`. Those ship TypeScript source and used the NodeNext convention of `.js` specifiers, and Turbopack has no equivalent of webpack's `extensionAlias`.
+**Decided:** the shared packages import each other with real `.ts` extensions, with `allowImportingTsExtensions` in the base tsconfig (we never emit with `tsc`). Services keep `.js` specifiers, since Next doesn't compile them.
+**Alternatives:** `next build --webpack` plus `extensionAlias` (gives up Turbopack); a build step for the packages (rejected in F1).
+**Also found:** (1) `pgEnum` needs non-empty tuple types that `ZodEnum.options` doesn't provide under the web tsconfig, so contracts now exports `CONTEST_STATUSES` and friends as `as const` tuples and both Zod and Postgres enums are built from them (drizzle-kit confirms no schema change). (2) `migrate.ts` computed its default path from `import.meta.dirname` at import time, which is undefined in Next's server bundle; it's now computed on call.

@@ -1,4 +1,4 @@
-import { ContestStatus, DeadLetterReason, VoteSource } from '@tally/contracts';
+import { CONTEST_STATUSES, DEAD_LETTER_REASONS, VOTE_SOURCES } from '@tally/contracts';
 import {
   bigint,
   bigserial,
@@ -17,9 +17,9 @@ import {
 
 const timestamptz = (name: string) => timestamp(name, { withTimezone: true });
 
-export const contestStatus = pgEnum('contest_status', ContestStatus.options);
-export const voteSource = pgEnum('vote_source', VoteSource.options);
-export const deadLetterReason = pgEnum('dead_letter_reason', DeadLetterReason.options);
+export const contestStatus = pgEnum('contest_status', CONTEST_STATUSES);
+export const voteSource = pgEnum('vote_source', VOTE_SOURCES);
+export const deadLetterReason = pgEnum('dead_letter_reason', DEAD_LETTER_REASONS);
 
 export const contests = pgTable('contests', {
   id: uuid('id').primaryKey().defaultRandom(),

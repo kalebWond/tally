@@ -1,7 +1,10 @@
-export default function Home() {
-  return (
-    <main className="grid min-h-dvh place-items-center">
-      <h1 className="text-4xl font-semibold tracking-tight">Tally</h1>
-    </main>
-  );
+import { notFound, redirect } from 'next/navigation';
+import { connection } from 'next/server';
+import { getCurrentContestId } from '@/lib/contests';
+
+export default async function Home() {
+  await connection();
+  const contestId = await getCurrentContestId();
+  if (!contestId) notFound();
+  redirect(`/results/${contestId}`);
 }

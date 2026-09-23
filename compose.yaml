@@ -118,6 +118,10 @@ services:
 
   web:
     <<: *node-service
+    environment:
+      <<: *service-env
+      # As the browser sees it, not as containers do: the page connects from the viewer's machine.
+      GATEWAY_PUBLIC_URL: ${GATEWAY_PUBLIC_URL:-ws://localhost:4001}
     depends_on:
       redpanda: { condition: service_healthy }
       postgres: { condition: service_healthy }
