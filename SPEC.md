@@ -101,6 +101,8 @@ Infrastructure: Redpanda 9092, PostgreSQL 5432, Redis 6379, ClickHouse 8123.
 | closes_at | timestamptz | nullable |
 | created_at | timestamptz | |
 
+*Decided (F16):* `opens_at` / `closes_at` are stamped by the open and close actions (the database clock, after locking the row) and define the voting window: a vote counts only if ingest accepted it inside it. Reopening starts a new window. Draft contests count nothing.
+
 ### `contestants`
 | Column | Type | Notes |
 |---|---|---|
@@ -213,6 +215,8 @@ Only changed contestants are sent after the initial snapshot.
 
 *Decided (F7):* both frames also carry `contestId`, `totalVotes` and `ts`. Totals are `[{ contestantId, total }]` with **absolute** values, and `changed` holds only contestants whose total differs from the previous frame. Close codes: `4400` invalid `contestId`, `1001` shutdown. Redis is polled once per watched contest every 250 ms. Contestant names and colours come from the web app, not the gateway. `GET /debug` serves a dev inspector page.
 
+*Changed (F16):* snapshots and updates also carry `status` (the contest's status, or null when Redis doesn't have it); a status change alone sends an update.
+
 *Changed (F11):* the gateway also sends `{ "type": "heartbeat", "ts" }` every 15 s; a client that hears nothing for 35 s treats the connection as dead. Clients reconnect forever with jittered backoff (0.5 s → 10 s), and every reconnect starts with a fresh snapshot.
 
 ### Generator control (Go)
@@ -232,6 +236,8 @@ GET  /status  → { running, currentRate, sentTotal }
 *Decided (F13):* the gate is `ADMIN_PASSWORD` plus a signed, httpOnly session cookie issued by `/login`; it protects `/control` and `/api/generator/*` now, and the admin routes below from F14.
 
 *Decided (F14):* `GET /api/contestants?contestId=`, `POST /api/contestants` (409 on a taken code), `PATCH /api/contestants/:id`. The code can't change after creation; `{ active: false }` deactivates (no delete). Schemas `ContestantCreate` / `ContestantUpdate` in contracts.
+
+*Decided (F16):* `POST /api/contests/:id/status { status: "open" | "closed" }`: draft → open, open → closed, closed → open; anything else 409. Closing stamps the cut-off; votes accepted before it still count.
 
 *Decided (F15):* `GET /api/dead-letters?contestId=&reason=&before=|after=&limit=` is keyset-paginated, newest first, answering `{ items, older, newer }`; `GET /api/dead-letters/counts?contestId=&since=` gives per-reason counts. View only.
 ```

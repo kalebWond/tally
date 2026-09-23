@@ -163,6 +163,15 @@ body {
 .board-status[data-state="unavailable"]::before {
   background: var(--live);
 }
+/* Contest closed (F16): a settled, solid mark, no pulse. */
+.board-status[data-state="final"] {
+  color: var(--ground);
+  background: var(--ink);
+  border-color: var(--ink);
+}
+.board-status[data-state="final"]::before {
+  background: var(--ground);
+}
 
 .board-count {
   display: grid;

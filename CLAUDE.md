@@ -121,11 +121,11 @@ A feature is done when its check in `IMPLEMENTATION_PLAN.md` passes, tests cover
 
 Update this section as you go.
 
-**Last completed:** F15, admin: dead letters (2026-09-23)
-**Next up:** F16, contest lifecycle (open/close; votes while closed → `contest_closed` dead letters). The resolver's 5 s re-check is the natural place to learn contest status too. Admin pattern: page under `app/admin/`, `requireAdmin(path)`; route handlers use `lib/api.ts` (`readAdminJson`, `readQuery`, `readParam`, `isAdmin`); add API paths to the `proxy.ts` matcher and a link in `components/admin/admin-nav.tsx`. DB integration tests in web use `createTestDatabase()` from `@tally/db/testing`. shadcn: `pnpm dlx shadcn@latest add <name>` in `apps/web` (answer "no" to overwriting `button.tsx`).
+**Last completed:** F16, contest lifecycle (2026-09-23)
+**Next up:** F17, minute buckets and chart (consumer increments `vote_buckets` in the batch transaction; Recharts chart on the results page; bucket sums must reconcile with totals). Admin pattern: page under `app/admin/`, `requireAdmin(path)`; route handlers use `lib/api.ts` (`readAdminJson`, `readQuery`, `readParam`, `isAdmin`); add API paths to the `proxy.ts` matcher and a link in `components/admin/admin-nav.tsx`. DB integration tests in web use `createTestDatabase()` from `@tally/db/testing`. shadcn: `pnpm dlx shadcn@latest add <name>` in `apps/web` (answer "no" to overwriting `button.tsx`).
 
 **Seed contest:** `0192f3a0-7c1e-7000-8000-00000000c0de`, codes `C1`–`C10`.
 
-**Operator pages:** `/control` (generator panel), `/admin/contestants` and `/admin/dead-letters`, behind `ADMIN_PASSWORD` from `.env`. Contestant codes are fixed once created; deactivate instead of deleting.
+**Operator pages:** `/control` (generator panel), `/admin/contests` (open/close/reopen), `/admin/contestants` and `/admin/dead-letters`, behind `ADMIN_PASSWORD` from `.env`. Contestant codes are fixed once created; deactivate instead of deleting. Checks that close the seed contest must reopen it. Web now talks to Redis for one thing: the contest status in the meta hash.
 
 **Known gaps:** Go isn't installed on the dev machine; `scripts/go.sh` runs it in a container. The gateway test "two clients receive identical frames within a second" flaked once in 6 full-suite runs (timing under load).

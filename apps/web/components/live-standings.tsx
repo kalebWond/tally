@@ -1,5 +1,6 @@
 'use client';
 
+import type { ContestStatus } from '@tally/contracts';
 import { MotionConfig } from 'motion/react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -10,17 +11,25 @@ import { ContestantRow } from './contestant-row';
 import { type ConnectionState, useLiveTotals } from './use-live-totals';
 
 interface Props {
-  contest: { id: string; name: string; status: string };
+  contest: { id: string; name: string; status: ContestStatus };
   entrants: Entrant[];
   gatewayUrl: string;
 }
 
-const STATUS_LABEL: Record<ConnectionState, string> = {
+const STATUS_LABEL: Record<ConnectionState | 'final' | 'draft', string> = {
   connecting: 'Connecting',
   live: 'Live',
   reconnecting: 'Reconnecting',
   offline: 'Offline',
   unavailable: 'Unavailable',
+  final: 'Final',
+  draft: 'Not open',
+};
+
+const FOOTER: Record<ContestStatus, string> = {
+  open: 'Send the contestant code to vote. Updated live.',
+  closed: 'Voting has closed. These are the final results.',
+  draft: 'Voting has not opened yet.',
 };
 
 /** Seconds until `at`, re-rendered every second while there is something to count down to. */
@@ -105,7 +114,20 @@ function useMovements(orderKey: string) {
 }
 
 export function LiveStandings({ contest, entrants, gatewayUrl }: Props) {
-  const { totals, totalVotes, connection, synced, retryAt } = useLiveTotals(gatewayUrl, contest.id);
+  const { totals, totalVotes, status, connection, synced, retryAt } = useLiveTotals(
+    gatewayUrl,
+    contest.id,
+  );
+  // The gateway's status (F16) wins, so a close shows without a reload; it is null when Redis
+  // doesn't know, and then the status this page was rendered with stands.
+  const contestStatus = status ?? contest.status;
+  // Connection trouble outranks the contest's status: "Final" must not hide a dead connection.
+  const pill =
+    connection === 'live' && contestStatus !== 'open'
+      ? contestStatus === 'closed'
+        ? 'final'
+        : 'draft'
+      : connection;
   // Totals shown but not current: keep them visible, dimmed, with a note.
   const stale = synced && connection !== 'live';
   const standings = useMemo(() => rank(entrants, totals), [entrants, totals]);
@@ -125,11 +147,11 @@ export function LiveStandings({ contest, entrants, gatewayUrl }: Props) {
   return (
     // Reduced-motion users get instant reorders and counters.
     <MotionConfig reducedMotion="user">
-      <main className="board" data-stale={stale || undefined}>
+      <main className="board" data-stale={stale || undefined} data-contest={contestStatus}>
         <header className="board-head">
           <div className="board-title">
-            <span className="board-status" data-state={connection}>
-              {STATUS_LABEL[connection]}
+            <span className="board-status" data-state={pill}>
+              {STATUS_LABEL[pill]}
             </span>
             <h1>{contest.name}</h1>
           </div>
@@ -161,7 +183,9 @@ export function LiveStandings({ contest, entrants, gatewayUrl }: Props) {
           ))}
         </ol>
 
-        <footer className="board-foot">Send the contestant code to vote. Updated live.</footer>
+        <footer className="board-foot" data-testid="board-foot">
+          {FOOTER[contestStatus]}
+        </footer>
       </main>
     </MotionConfig>
   );

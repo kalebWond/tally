@@ -1,5 +1,5 @@
 import { type DeadLetterEvent, type DeadLetterReason, VoteEvent } from '@tally/contracts';
-import { type Db, schema } from '@tally/db';
+import { acceptsVoteAt, type Db, schema } from '@tally/db';
 import { inArray, sql } from 'drizzle-orm';
 import type { DeadLetterPublisher } from './dead-letter-publisher.js';
 import type { Resolver } from './resolver.js';
@@ -69,7 +69,8 @@ const isDeadLetter = (x: VoteEvent | NewDeadLetter): x is NewDeadLetter => 'reas
  * at-least-once on the topic: a redelivered batch republishes (same key, same failed_at).
  */
 export async function processBatch(messages: InboundMessage[], deps: Deps): Promise<BatchResult> {
-  const votes: NewVote[] = [];
+  /** Votes whose code resolved to an active contestant; the contest's window is checked in the transaction. */
+  const candidates: { vote: NewVote; event: VoteEvent }[] = [];
   const dead: NewDeadLetter[] = [];
   const seen = new Set<string>();
   let duplicates = 0;
@@ -92,7 +93,7 @@ export async function processBatch(messages: InboundMessage[], deps: Deps): Prom
       dead.push(deadLetter(parsed, reason, parsed.idempotency_key, parsed.contest_id));
       continue;
     }
-    votes.push({
+    const vote: NewVote = {
       contestId: parsed.contest_id,
       contestantId: resolved.contestantId,
       codeSubmitted: parsed.code,
@@ -101,10 +102,38 @@ export async function processBatch(messages: InboundMessage[], deps: Deps): Prom
       idempotencyKey: parsed.idempotency_key,
       // When ingest accepted the vote, not when we processed it: stable across replays.
       receivedAt: new Date(parsed.sent_at),
-    });
+    };
+    candidates.push({ vote, event: parsed });
   }
 
-  const { counted, updates, deadEvents } = await deps.db.transaction(async (tx) => {
+  const { counted, updates, deadEvents, votes } = await deps.db.transaction(async (tx) => {
+    // Was each vote's contest open when ingest accepted it? The contests are read FOR SHARE, so
+    // a close (setContestStatus, FOR UPDATE) waits for this batch and stamps closes_at after it:
+    // every vote counted here was accepted before the stamp, and later batches see the close.
+    const votes: NewVote[] = [];
+    const contestIds = [...new Set(candidates.map((c) => c.event.contest_id))];
+    const windows = new Map(
+      contestIds.length
+        ? (
+            await tx
+              .select({
+                id: schema.contests.id,
+                status: schema.contests.status,
+                opensAt: schema.contests.opensAt,
+                closesAt: schema.contests.closesAt,
+              })
+              .from(schema.contests)
+              .where(inArray(schema.contests.id, contestIds))
+              .for('share')
+          ).map((c) => [c.id, c])
+        : [],
+    );
+    for (const { vote, event } of candidates) {
+      const contest = windows.get(event.contest_id);
+      if (contest && acceptsVoteAt(contest, new Date(event.sent_at))) votes.push(vote);
+      else dead.push(deadLetter(event, 'contest_closed', event.idempotency_key, event.contest_id));
+    }
+
     const inserted = votes.length
       ? await tx
           .insert(schema.votes)
@@ -163,6 +192,7 @@ export async function processBatch(messages: InboundMessage[], deps: Deps): Prom
       counted: inserted.length,
       updates: touched.length ? await readTotals(tx, touched) : [],
       deadEvents,
+      votes,
     };
   });
 

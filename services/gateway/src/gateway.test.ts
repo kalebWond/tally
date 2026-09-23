@@ -91,6 +91,32 @@ describe('gateway /live', () => {
     client.ws.close();
   });
 
+  it('carries the contest status: null until web has written one, then in the snapshot', async () => {
+    await setTotals({ [A]: 1 });
+    const before = connect();
+    await until(() => before.frames.length === 1);
+    expect(before.frames[0]?.msg).toMatchObject({ type: 'snapshot', status: null });
+    before.ws.close();
+
+    await redis.hset(redisKeys.meta(CONTEST), 'status', 'open');
+    const after = connect();
+    await until(() => after.frames.length === 1);
+    expect(after.frames[0]?.msg).toMatchObject({ type: 'snapshot', status: 'open' });
+    after.ws.close();
+  });
+
+  it('a close alone (no vote moving) reaches open pages as an update', async () => {
+    await setTotals({ [A]: 3 });
+    await redis.hset(redisKeys.meta(CONTEST), 'status', 'open');
+    const client = connect();
+    await until(() => client.frames.length === 1);
+
+    await redis.hset(redisKeys.meta(CONTEST), 'status', 'closed');
+    await until(() => client.frames.length === 2);
+    expect(client.frames[1]?.msg).toMatchObject({ type: 'update', changed: [], status: 'closed' });
+    client.ws.close();
+  });
+
   it('update frames carry only the contestants that changed', async () => {
     await setTotals({ [A]: 10, [B]: 4 });
     const client = connect();

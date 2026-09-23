@@ -15,20 +15,43 @@ const entrant = (n: number, code = `C${n}`): Entrant => ({
   active: true,
 });
 
-const snapshot = (totals: [number, number][], totalVotes = 0): LiveSnapshot => ({
+const snapshot = (
+  totals: [number, number][],
+  totalVotes = 0,
+  status: LiveSnapshot['status'] = 'open',
+): LiveSnapshot => ({
   type: 'snapshot',
   contestId: CONTEST,
   totals: totals.map(([n, total]) => ({ contestantId: id(n), total })),
   totalVotes,
+  status,
   ts: 1,
 });
 
-const update = (changed: [number, number][], totalVotes = 0): LiveUpdate => ({
+const update = (
+  changed: [number, number][],
+  totalVotes = 0,
+  status: LiveUpdate['status'] = 'open',
+): LiveUpdate => ({
   type: 'update',
   contestId: CONTEST,
   changed: changed.map(([n, total]) => ({ contestantId: id(n), total })),
   totalVotes,
+  status,
   ts: 2,
+});
+
+describe('applyFrame — contest status (F16)', () => {
+  it('takes the status from every snapshot and update, so a close shows without a reload', () => {
+    const open = applyFrame(emptyTotals(), snapshot([[1, 5]], 5, 'open'));
+    const closed = applyFrame(open, update([], 5, 'closed'));
+    expect(closed).toMatchObject({ status: 'closed', totalVotes: 5 });
+    expect(closed.totals.get(id(1))).toBe(5);
+  });
+
+  it('keeps null when the gateway does not know, leaving the page on its rendered status', () => {
+    expect(applyFrame(emptyTotals(), snapshot([], 0, null)).status).toBeNull();
+  });
 });
 
 describe('applyFrame', () => {

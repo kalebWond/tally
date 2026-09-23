@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 
 const LINKS = [
   { href: '/control', label: 'Generator' },
+  { href: '/admin/contests', label: 'Contests' },
   { href: '/admin/contestants', label: 'Contestants' },
   { href: '/admin/dead-letters', label: 'Dead letters' },
 ] as const;

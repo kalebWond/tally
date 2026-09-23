@@ -169,6 +169,8 @@ Build one feature per session. Each has a goal, a build list, and a check that d
 
 **Build:** Open and close a contest. Votes arriving while closed are dead-lettered with `contest_closed`.
 
+*Decided (F16):* "arriving" = accepted by ingest (`sent_at`), with the cut-off enforced by a lock handshake between the close and consumer batches; reopen allowed; draft counts nothing; open results pages show Final through the gateway. Verified mid-run at 1,500 votes/s: 0 late votes counted, accepted = counted + dead-lettered.
+
 **Done when:** Closing mid-run stops totals immediately and every subsequent vote appears in dead letters.
 
 ---

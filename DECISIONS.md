@@ -29,6 +29,8 @@ Where the build departs from `SPEC.md` or `IMPLEMENTATION_PLAN.md`, or pins down
 | Dead-letter reasons (SPEC §6) | `unknown_code`, `contest_closed`, `malformed` | plus `inactive_contestant`: a vote for a deactivated contestant. Postgres enum gained the value (migration `0002`) | F14 |
 | Consumer code cache (F5 decision) | resolved codes cached for the process lifetime; misses for 5 s | every lookup, hit or miss, is re-checked after 5 s, so (de)activation reaches running consumers | F14 |
 | `dead_letters` columns (SPEC §5) | id, raw payload, reason, received_at | plus `contest_id` (nullable uuid, no FK), written by the consumer and backfilled from payloads; indexed with reason and id | F15 |
+| Gateway protocol (SPEC §7) | snapshot and update carry totals | both also carry `status` (contest status from the Redis meta hash, or null); a status change alone sends an update with `changed: []` | F16 |
+| Redis meta hash (SPEC §5 keys) | written by the consumer | also `status`, written by web on each open/close (web now has `REDIS_URL`) | F16 |
 | Redis sync (SPEC §5 keys, plan F5) | "increment the Redis counter"; `tally:idem:{key}` string, 1 h TTL, as a redelivery guard | Redis is **set** to absolute totals read back from Postgres (upward only, via Lua). No `tally:idem:*` keys: Postgres's unique `idempotency_key` is the only dedupe | F5 |
 | Unresolvable votes (plan F6, SPEC §5 `contestant_id` null = unresolved) | dead-lettering is F6; unresolved votes could sit in `votes` with a null contestant | F5 writes them to `dead_letters` (`unknown_code` / `malformed`); `votes.contestant_id` is never null in practice. F6 adds publishing to `votes.dead` | F5 |
 | `dead_letters` columns (SPEC §5) | id, raw payload, reason, received_at | plus a unique, nullable `idempotency_key` (the vote's key, or `offset:topic/partition/offset`) so replays don't duplicate dead letters | F5 |
@@ -74,6 +76,8 @@ Where the build departs from `SPEC.md` or `IMPLEMENTATION_PLAN.md`, or pins down
 | Contestant fields | code as `VoteCode` (trimmed, uppercased) and fixed after creation; name 1–80; `imageUrl` https only; accents `#RRGGBB` stored uppercase; country ISO alpha-2 checked against `Intl.DisplayNames` | F14 |
 | Deactivation | `active = false`: later votes dead-lettered as `inactive_contestant`, earlier votes and totals kept, hidden from results pages and from the generator's `/start` codes. Reversible | F14 |
 | Dead-letter API | `GET /api/dead-letters?contestId=&reason=&before=\|after=&limit=` → `{ items, older, newer }` (keyset cursors on id, newest first, limit 1–200, default 50); `GET /api/dead-letters/counts?contestId=&since=` → `{ total, byReason, latestId }`. Contracts `DeadLetterQuery` / `DeadLetterPage` / `DeadLetterCounts` | F15 |
+| Contest lifecycle | `POST /api/contests/:id/status { status: "open" \| "closed" }` → `{ contest, liveUpdated }`; allowed draft → open, open → closed, closed → open (reopen); anything else 409. Opening stamps `opens_at` and clears `closes_at`; closing stamps `closes_at` | F16 |
+| Which votes a contest counts | exactly those ingest accepted (`sent_at`) while it was open: `opens_at ≤ sent_at` and, once closed, `sent_at < closes_at`. Draft counts nothing. Null `opens_at` = open since creation. Everything else → `contest_closed` | F16 |
 
 ### Outstanding: a rule not met yet
 
@@ -483,3 +487,27 @@ Headless Chrome on the containerised stack; a real run at 1,000 votes/s with 10%
 - **Every reason is true of its rows:** no `unknown_code` row's code exists in its contest, every `inactive_contestant` row is C10, malformed rows have no contest, and no dead letter was also counted as a vote (`0|0|0|0`).
 - **Malformed:** both injected messages appear under All contests; expanding a row shows `{ "hello": "not a vote" }`.
 - **Paging:** 4 pages gave 200 rows, with no repeats, strictly newest first; "Newer" returns exactly the previous page.
+
+## F16 — The cut-off is when ingest accepted the vote, enforced with a lock handshake
+**Decided:** a vote counts if and only if ingest accepted it while the contest was open (`acceptsVoteAt` in `@tally/db`). A vote accepted a moment before the close counts even if it's still queued; a vote accepted after doesn't, even if the consumer hasn't heard of the close yet. Closing (`setContestStatus`) locks the contest row `FOR UPDATE` and only then stamps `closes_at = clock_timestamp()`. Each consumer batch reads its contests `FOR SHARE` inside its transaction before deciding. So a close waits for every batch that has already decided, and stamps a time after all of them: every vote those batches counted was accepted before the stamp, and every later batch sees the close. The decision is also deterministic under replay: it depends on `sent_at` and the stamp, not on when the consumer runs.
+**Why FOR SHARE, not the FK's lock:** inserting votes already takes `KEY SHARE` on the contest, but only at insert time, after the batch has decided. The explicit lock covers the decision. `clock_timestamp()`, not `now()`, because `now()` is the transaction's start, before the wait.
+**Tested with real locks, not timing:** a batch blocks while another transaction holds the contest `FOR NO KEY UPDATE` (which conflicts with `FOR SHARE` but not with the FK's `KEY SHARE`); a close blocks behind a `FOR SHARE` holder and stamps after it lets go. Mutation-checked: removing the lock fails the first; `now()` fails the second. A timing-based test (two batch loops with a close in the middle) could not tell the lock was missing, so it stays only as a no-vote-lost check.
+**Assumes** ingest's clock and Postgres's agree (same host in compose; NTP in any real deployment).
+**Alternatives:** dead-letter whatever the consumer processes after it sees the close (a voter who sent in time loses out to queue lag, and a replay can decide differently).
+
+## F16 — Draft counts nothing; reopen starts a new window
+**Decided:** only an open contest counts. Votes for a draft use the existing `contest_closed` reason, read as "not open", with no new enum value. The admin can open a draft, close an open contest, and reopen a closed one (an accidental close shouldn't be final). Reopening sets a new `opens_at` and clears `closes_at`, so votes sent while the contest was closed stay dead-lettered. A rare edge: a vote from the first window still queued at the moment of a reopen is dead-lettered too, because it predates the new `opens_at`. No scheduler; `opens_at` / `closes_at` record what happened rather than plan it.
+
+## F16 — Results pages learn of a close through the gateway
+**Decided:** after the Postgres commit, web writes the status into the contest's Redis meta hash (web got `REDIS_URL` and an ioredis client). The gateway reads it with the totals on each poll and puts `status` in snapshots and updates; a status change alone produces an update. The page shows the gateway's status when it has one, else the one it was rendered with. The pill reads "Final" for a closed contest and "Not open" for a draft, but connection trouble still outranks both, so "Final" never hides a dead connection. The footer says "Voting has closed. These are the final results."
+**Why web writes it, not the consumer:** the consumer writes Redis after its own commit. A batch that read "open" and committed just before a close could then overwrite web's "closed". Web writes only after its transaction commits. If that Redis write fails, the response says `liveUpdated: false` and the admin page tells the operator. Postgres has already decided and the consumer enforces it either way. A Redis flush loses the status until the next transition (pages then fall back to their rendered one).
+
+## F16 — Contests admin page
+`/admin/contests`: each contest with its status, window times (UTC) and one action (Open voting / Close voting / Reopen) behind a confirm dialog that says what closing does: "Votes ingest accepts from this moment on are dead-lettered… Votes already accepted still count, even if they are still in the queue." After the change, the notice shows the exact cut-off.
+
+## F16 — How "closing mid-run stops totals immediately; every later vote is dead-lettered" was verified
+Headless Chrome, two tabs (the contests page and a results page), with a generator run at 1,500 votes/s. The close was clicked mid-run and the generator kept sending for 5 s after it. All checks passed, on two runs:
+- **No vote accepted at or after `closes_at` was counted** (0). The last `vote_totals` write came **60 ms** after `closes_at`, from votes accepted before it; totals then stayed still for the remaining 5 s.
+- **Nothing lost:** ingest accepted = counted + dead-lettered (**14,144 = 6,089 + 8,055**; the first run was 14,354 = 6,179 + 8,175). Every `contest_closed` dead letter was accepted after the cut-off, none before. All of them appear in the dead-letter browser under Contest closed.
+- **The results page, open throughout,** switched to Final without a reload and shows the final total.
+- **Reopen:** the page went back to Live, and a new vote counted. Opening an open contest → 409 "The contest is open; it can't be opened from there."

@@ -1,5 +1,6 @@
 import { createServer } from 'node:http';
 import {
+  ContestStatus,
   HEARTBEAT_MS,
   type HealthResponse,
   LiveCloseCodes,
@@ -34,6 +35,7 @@ interface Room {
   pending: number;
   last: Map<string, number>;
   totalVotes: number;
+  status: ContestStatus | null;
   ready: Promise<void>;
   timer?: NodeJS.Timeout;
   closed: boolean;
@@ -52,13 +54,18 @@ export function createGateway({
   const alive = new WeakMap<WebSocket, boolean>();
 
   async function read(contestId: string) {
-    const [totals, meta] = await Promise.all([
+    const [totals, [totalVotes, status]] = await Promise.all([
       redis.hgetall(redisKeys.totals(contestId)),
-      redis.hget(redisKeys.meta(contestId), 'totalVotes'),
+      redis.hmget(redisKeys.meta(contestId), 'totalVotes', 'status'),
     ]);
     const map = new Map(Object.entries(totals).map(([id, v]) => [id, Number(v)]));
     const sum = [...map.values()].reduce((s, v) => s + v, 0);
-    return { totals: map, totalVotes: meta === null ? sum : Number(meta) };
+    const known = ContestStatus.safeParse(status);
+    return {
+      totals: map,
+      totalVotes: totalVotes == null ? sum : Number(totalVotes),
+      status: known.success ? known.data : null,
+    };
   }
 
   function broadcast(room: Room, message: LiveUpdate) {
@@ -74,16 +81,19 @@ export function createGateway({
         if (room.closed) return;
         const changed = diffTotals(room.last, next.totals);
         const totalsMoved = next.totalVotes !== room.totalVotes;
+        const statusMoved = next.status !== room.status;
         // Assign and broadcast together, with no await in between: every client's state is
         // always "snapshot + the updates computed after it".
         room.last = next.totals;
         room.totalVotes = next.totalVotes;
-        if (changed.length || totalsMoved) {
+        room.status = next.status;
+        if (changed.length || totalsMoved || statusMoved) {
           broadcast(room, {
             type: 'update',
             contestId: room.contestId,
             changed,
             totalVotes: next.totalVotes,
+            status: next.status,
             ts: Date.now(),
           });
         }
@@ -102,12 +112,14 @@ export function createGateway({
       pending: 0,
       last: new Map(),
       totalVotes: 0,
+      status: null,
       ready: Promise.resolve(),
       closed: false,
     };
     room.ready = read(contestId).then((first) => {
       room.last = first.totals;
       room.totalVotes = first.totalVotes;
+      room.status = first.status;
       schedulePoll(room);
     });
     rooms.set(contestId, room);
@@ -143,6 +155,7 @@ export function createGateway({
       contestId,
       totals: [...room.last].map(([contestantId, total]) => ({ contestantId, total })),
       totalVotes: room.totalVotes,
+      status: room.status,
       ts: Date.now(),
     };
     ws.send(JSON.stringify(snapshot));

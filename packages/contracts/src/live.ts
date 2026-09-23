@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ContestStatus } from './enums.ts';
 
 // Gateway protocol (SPEC §7): WS /live?contestId=…
 // A snapshot on connect, then updates carrying only the contestants whose total changed.
@@ -11,11 +12,19 @@ export const LiveTotal = z.object({
 });
 export type LiveTotal = z.infer<typeof LiveTotal>;
 
+/**
+ * The contest's status as last written to Redis by the admin (F16), so an open results page
+ * learns of a close without a reload. Null when Redis doesn't have it: the page keeps the status
+ * it was rendered with.
+ */
+const LiveStatus = ContestStatus.nullable();
+
 export const LiveSnapshot = z.object({
   type: z.literal('snapshot'),
   contestId: z.uuid(),
   totals: z.array(LiveTotal),
   totalVotes: z.number().int().nonnegative(),
+  status: LiveStatus,
   /** Server time of the read, epoch ms. */
   ts: z.number().int(),
 });
@@ -27,6 +36,8 @@ export const LiveUpdate = z.object({
   /** Only the contestants whose total changed since the previous frame. */
   changed: z.array(LiveTotal),
   totalVotes: z.number().int().nonnegative(),
+  /** Sent on every update; a status change alone also produces one (with `changed` empty). */
+  status: LiveStatus,
   ts: z.number().int(),
 });
 export type LiveUpdate = z.infer<typeof LiveUpdate>;

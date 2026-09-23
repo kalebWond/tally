@@ -35,7 +35,7 @@ export async function getEntrants(contestId: string): Promise<Entrant[]> {
 export async function getContests() {
   const c = schema.contests;
   return db()
-    .select({ id: c.id, name: c.name, status: c.status })
+    .select({ id: c.id, name: c.name, status: c.status, opensAt: c.opensAt, closesAt: c.closesAt })
     .from(c)
     .orderBy(sql`${c.status} = 'open' desc`, desc(c.createdAt));
 }

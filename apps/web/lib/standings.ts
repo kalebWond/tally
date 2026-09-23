@@ -1,4 +1,4 @@
-import type { LiveMessage } from '@tally/contracts';
+import type { ContestStatus, LiveMessage } from '@tally/contracts';
 
 /** A contestant's display details, loaded from Postgres by the server component. */
 export interface Entrant {
@@ -17,6 +17,8 @@ export interface Entrant {
 export interface Totals {
   totals: ReadonlyMap<string, number>;
   totalVotes: number;
+  /** Contest status from the gateway; null = not known there, use the server-rendered one. */
+  status: ContestStatus | null;
 }
 
 export interface Standing extends Entrant {
@@ -25,7 +27,7 @@ export interface Standing extends Entrant {
   rank: number;
 }
 
-export const emptyTotals = (): Totals => ({ totals: new Map(), totalVotes: 0 });
+export const emptyTotals = (): Totals => ({ totals: new Map(), totalVotes: 0, status: null });
 
 /** Snapshots replace everything; updates overwrite only the contestants they name; heartbeats change nothing. */
 export function applyFrame(state: Totals, frame: LiveMessage): Totals {
@@ -34,11 +36,12 @@ export function applyFrame(state: Totals, frame: LiveMessage): Totals {
     return {
       totals: new Map(frame.totals.map((t) => [t.contestantId, t.total])),
       totalVotes: frame.totalVotes,
+      status: frame.status,
     };
   }
   const totals = new Map(state.totals);
   for (const t of frame.changed) totals.set(t.contestantId, t.total);
-  return { totals, totalVotes: frame.totalVotes };
+  return { totals, totalVotes: frame.totalVotes, status: frame.status };
 }
 
 const byCode = new Intl.Collator('en', { numeric: true }).compare;

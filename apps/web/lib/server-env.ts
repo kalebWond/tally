@@ -14,3 +14,6 @@ export const serverEnv = () => Env.parse(process.env);
 
 /** The generator's control API, server-side only: the browser never talks to it directly. */
 export const generatorUrl = () => z.url().parse(process.env.GENERATOR_URL);
+
+/** Redis, for web's one write: a contest's status in the live meta hash (F16). */
+export const redisUrl = () => z.url().parse(process.env.REDIS_URL);
