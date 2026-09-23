@@ -182,7 +182,7 @@ Topic `votes.dead` carries the original payload plus `reason` (`unknown_code`, `
 
 *Changed (F6):* the message is an envelope, `{ "v": 1, "reason", "failed_at", "idempotency_key", "original" }`, where `original` is the message as received (the parsed JSON, or `{ "raw": "…" }` if it wasn't JSON). Delivery is at-least-once: a redelivered or replayed batch republishes its dead letters with the same `idempotency_key` and `failed_at`. Keyed by the original `code` when present.
 
-All schemas are defined once as Zod schemas in `packages/contracts` and imported by every TypeScript service. The Go generator has a matching struct, kept in sync manually and covered by a contract test.
+All schemas are defined once as Zod schemas in `packages/contracts` and imported by every TypeScript service. The Go generator has a matching struct, kept in sync manually and covered by a contract test. *Decided (F12):* the contract test compares the Go structs with JSON Schemas exported from Zod, and a TS test keeps those files in sync with Zod.
 
 ---
 
@@ -222,6 +222,8 @@ POST /burst   { ratePerSec, durationSec }
 POST /stop
 GET  /status  → { running, currentRate, sentTotal }
 ```
+
+*Changed (F12):* `/start` also takes `codes` (required; the generator never reads the database) and `duplicateSenderRatio`. `/status` also returns `contestId`, `baseRate`, `burstEndsAt`, `startedAt`, `accepted`, `rejected`, `failed`, `invalidSent`, `duplicateSent` and `latencyMs`. `/start` while running and `/burst` while stopped return 409. Shapes are Zod schemas in contracts (`Generator*`).
 
 ### Admin (web, shared-password protected)
 ```

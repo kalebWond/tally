@@ -135,6 +135,10 @@ services:
     restart: unless-stopped
     build: { context: tools/generator }
     ports: ["4002:4002"]
+    environment:
+      INGEST_URL: http://ingest:4000
+    depends_on:
+      ingest: { condition: service_started }
 
 volumes:
   redpanda-data:

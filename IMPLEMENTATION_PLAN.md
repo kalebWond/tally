@@ -125,6 +125,8 @@ Build one feature per session. Each has a goal, a build list, and a check that d
 
 **Build:** Go service producing votes at a configurable rate. Burst mode. Configurable invalid-code ratio and duplicate-sender ratio. HTTP control API. Graceful stop.
 
+*Decided (F12):* codes passed in `/start`; drifting-race popularity; `/burst` requires a running generator. Measured 2,999 votes/s for 60 s with 0 errors; dead letters equal to invalid votes sent, exactly.
+
 **Done when:** It sustains 3,000 votes/sec against the ingest API without errors, and the invalid-code ratio shows up correctly in the dead-letter topic.
 
 ---

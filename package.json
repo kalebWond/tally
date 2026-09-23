@@ -19,7 +19,8 @@
     "infra:up": "docker compose up -d --wait",
     "stack:up": "docker compose --profile app up -d --build --wait",
     "down": "docker compose --profile app down",
-    "check:health": "scripts/check-health.sh"
+    "check:health": "scripts/check-health.sh",
+    "test:go": "scripts/go.sh test ./..."
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",

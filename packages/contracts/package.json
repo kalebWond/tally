@@ -7,12 +7,14 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "typecheck": "tsc -p ."
+    "typecheck": "tsc -p .",
+    "export-schemas": "tsx scripts/export-schemas.ts"
   },
   "peerDependencies": {
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "zod": "^4.6.5"
+    "zod": "^4.6.5",
+    "tsx": "^4.23.15"
   }
 }

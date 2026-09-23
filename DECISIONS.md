@@ -22,6 +22,8 @@ Where the build departs from `SPEC.md` or `IMPLEMENTATION_PLAN.md`, or pins down
 | Layout (CLAUDE.md) | no package for the database | new `packages/db` (Drizzle schema, client, migrate, seed). Migrations in `infra/migrations`. CLAUDE.md layout updated | F2 |
 | Frontend stack (CLAUDE.md, SPEC §9) | Motion **and** react-countup | Motion only: counters retarget a `useSpring`; react-countup dropped because its updates restart the animation (the stutter CLAUDE.md warns about) | F9 |
 | Gateway protocol (SPEC §7) | snapshot on connect, then updates | plus `{ type: "heartbeat", ts }` every 15 s; clients treat 35 s of silence as a dead connection | F11 |
+| Generator `/start` (SPEC §7) | `{ ratePerSec, contestId, invalidCodeRatio }` | plus required `codes` (the generator never reads the database) and `duplicateSenderRatio`; `/start` while running and `/burst` while stopped → 409; every control call returns the full status | F12 |
+| Generator `/status` (SPEC §7) | `{ running, currentRate, sentTotal }` | adds `contestId`, `baseRate`, `burstEndsAt`, `startedAt`, `accepted`, `rejected`, `failed`, `invalidSent`, `duplicateSent`, `latencyMs {p50,p95,p99}` | F12 |
 | Redis sync (SPEC §5 keys, plan F5) | "increment the Redis counter"; `tally:idem:{key}` string, 1 h TTL, as a redelivery guard | Redis is **set** to absolute totals read back from Postgres (upward only, via Lua). No `tally:idem:*` keys: Postgres's unique `idempotency_key` is the only dedupe | F5 |
 | Unresolvable votes (plan F6, SPEC §5 `contestant_id` null = unresolved) | dead-lettering is F6; unresolved votes could sit in `votes` with a null contestant | F5 writes them to `dead_letters` (`unknown_code` / `malformed`); `votes.contestant_id` is never null in practice. F6 adds publishing to `votes.dead` | F5 |
 | `dead_letters` columns (SPEC §5) | id, raw payload, reason, received_at | plus a unique, nullable `idempotency_key` (the vote's key, or `offset:topic/partition/offset`) so replays don't duplicate dead letters | F5 |
@@ -59,6 +61,8 @@ Where the build departs from `SPEC.md` or `IMPLEMENTATION_PLAN.md`, or pins down
 | Reorder animation | Motion `layout="position"` on ID-keyed rows, no-bounce 0.45 s spring; the overtaking row draws above the rows it passes and its accent edge glows for 0.8 s; instant for reduced motion | F10 |
 | Reconnect policy | never gives up; jittered exponential backoff 0.5 s → 10 s cap; `4400` never retries, `1001` retries in < 1 s; backoff resets on snapshot, not on open; pauses while the browser is offline | F11 |
 | Connection states | `Connecting` / `Live` (after snapshot) / `Reconnecting` / `Offline` / `Unavailable`; stale totals stay visible, dimmed, with a "reconnecting in Ns" note | F11 |
+| Generator traffic | drifting-race popularity (random walk every 2 s); invalid codes are well-formed so they reach dead letters; synthetic `sim:` senders; one Idempotency-Key per vote | F12 |
+| Go ↔ TS contract test (SPEC §6) | JSON Schemas exported from Zod (drift-tested in TS); Go test checks structs, types, nullability, enums and validation bounds against them | F12 |
 
 ### Outstanding: a rule not met yet
 
@@ -363,3 +367,28 @@ Headless Chrome on the containerised stack. In each case 30 votes were sent whil
 | `pause` (socket open, silent) | 34.0 s | 1.0 s | ✓ |
 
 One page load across all three (`performance.getEntriesByType("navigation").length === 1`).
+
+## F12 — Go generator: pacer, worker pool, standard library only
+
+**Decided:** one run at a time. A pacer goroutine ticks every 10 ms and releases `rate × elapsed` votes, carried in an integer accumulator (vote·µs), so fractions are never lost and a long run stays exact. It hands votes to a fixed worker pool (`GENERATOR_WORKERS`, default 256) sharing one keep-alive `http.Client`. When workers can't keep up, the pacer blocks rather than dropping votes; `/status` shows the real throughput. Requests already in flight finish on Stop, and nothing new starts. Standard library only.
+**Why:** `time.Ticker` can't fire 3,000 times a second, but 30 per 10 ms tick is easy. Backpressure instead of drops keeps "sent" honest.
+
+## F12 — Control API and traffic model
+
+**Decided:** SPEC §7's endpoints, with `/start` taking `codes` (passed in; the generator never reads the database) and `duplicateSenderRatio`. `/start` while running and `/burst` while stopped return **409**. A burst overrides the rate until it expires, then falls back by itself. Each vote gets its own `Idempotency-Key`. Senders are obviously synthetic (`sim:<hex>`). Invalid codes are well-formed (`X` + 6 alphanumerics, never a real code), so ingest accepts them and the consumer dead-letters them, instead of them bouncing as 400s. Duplicates reuse one of the last 1,024 senders. Popularity is a **drifting race**: a multiplicative random walk every 2 s (σ 0.35, weights clamped to [0.05, 20]), so leads build and change hands on their own. The unit test saw ≥3 different leaders over 300 steps.
+**Why:** passing codes keeps the generator a pure HTTP client with no second copy of schema knowledge (F13's panel reads them from Postgres). The drifting race produces F10's overtakes without anyone steering.
+
+## F12 — Contract test through JSON Schema exported from Zod
+
+**Decided:** `packages/contracts` exports JSON Schemas (`pnpm --filter @tally/contracts export-schemas`) for the vote request, the generator's start, burst and status bodies, and the error and health responses. A TS test fails if the committed files drift from Zod. The Go test checks each struct against its schema: field names both ways, JSON types, nullability, response fields never `omitempty`, required fields never `omitempty`, the `source` enum, and that the Go validation regexes and bounds are identical to the schema's. The schema files are excluded from Biome (generated).
+**Mutation-checked:** renaming `contestId` to `contest_id` in Go, or moving `maxRate` to 25,000, each fails with a precise message.
+**Tooling:** Go isn't installed on the dev host. `scripts/go.sh` runs host Go if present, otherwise the `golang:1.27-alpine` image with the repo mounted. `pnpm test:go` runs the 22 Go tests.
+
+## F12 — Measured: 3,000 votes/s for 60 s
+
+Containerised stack on the dev machine; `ratePerSec: 3000`, 5% invalid, 10% duplicate senders:
+- **Throughput:** 190,850 sent in 63.6 s (**2,999/s**), 190,850 accepted, **0 rejected, 0 failed**.
+- **Ingest latency** (seen by the generator): p50 7.2 ms, p95 8.4 ms, p99 9.6 ms.
+- **Dead letters reconcile exactly, not just proportionally:** generator `invalidSent` 9,695 (5.07%) = `votes.dead` +9,695 = `dead_letters` +9,695. `votes` +181,155 = accepted − invalid.
+- **Consumer lag** hovered at 270–540 messages without growing, and drained to 0 within seconds of the stop.
+- **Caveat:** the per-5 s rates in the run log read 3,100–3,250 because each sample loop also ran `docker exec` calls, stretching its interval past 5 s. The whole-run average is the real figure.

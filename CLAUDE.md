@@ -49,6 +49,7 @@ TypeScript everywhere except the load generator, which is Go.
 - Redpanda: containers use `redpanda:9092`, the host uses `localhost:19092`. A one-shot `topics` job creates `votes.raw` and `votes.dead` (6 partitions each) on every `docker compose up`. Inspect with `docker compose exec redpanda rpk topic consume votes.raw -o start`.
 - `pnpm db:migrate` / `pnpm db:seed` on the host (both idempotent). After a schema change, run `pnpm db:generate` and commit the SQL in `infra/migrations`. The `app` profile runs a one-shot `migrate` job (migrate + seed) before consumer and web.
 - `packages/*` import each other with `.ts` extensions (Turbopack can't map `.js` → `.ts`); services use `.js`. A bundled workspace package's runtime deps must also be the app's deps.
+- Go (generator): `pnpm test:go` / `scripts/go.sh <go args>` use host Go if installed, otherwise the `golang:1.27-alpine` image. After changing a contract the generator speaks, run `pnpm --filter @tally/contracts export-schemas`.
 - `pnpm lint` (Biome), `pnpm typecheck`, `pnpm test` (Vitest), `pnpm check:health`.
 - Every new service gets its own Dockerfile and a compose entry under the `app` profile when it's created.
 
@@ -120,8 +121,8 @@ A feature is done when its check in `IMPLEMENTATION_PLAN.md` passes, tests cover
 
 Update this section as you go.
 
-**Last completed:** F11, connection handling (2026-09-23)
-**Next up:** F12, Go vote generator. It POSTs to ingest (`VoteRequest` in contracts; mirror it in Go with a contract test). Go isn't installed on the host: build and test in the `golang:1.27-alpine` container.
+**Last completed:** F12, Go vote generator (2026-09-23)
+**Next up:** F13, generator control panel. Use the `Generator*` Zod schemas in contracts; the panel reads codes from Postgres and passes them to `/start`. shadcn/ui gets set up here (deferred from F8).
 
 **Seed contest:** `0192f3a0-7c1e-7000-8000-00000000c0de`, codes `C1`–`C10`.
 

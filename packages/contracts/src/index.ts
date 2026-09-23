@@ -1,5 +1,6 @@
 export * from './dead-letter.ts';
 export * from './enums.ts';
+export * from './generator.ts';
 export * from './health.ts';
 export * from './live.ts';
 export * from './redis-keys.ts';

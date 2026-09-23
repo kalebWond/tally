@@ -1,14 +1,17 @@
 import { z } from 'zod';
 import { VoteSource } from './enums.ts';
 
+/** A contestant code as voters send it: normalised to uppercase, 1–16 letters or digits. */
+export const VoteCode = z
+  .string()
+  .trim()
+  .toUpperCase()
+  .regex(/^[A-Z0-9]{1,16}$/, 'must be 1–16 letters or digits');
+
 /** `POST /votes` body. `code` is normalised here so every consumer sees one canonical form. */
 export const VoteRequest = z.object({
   contestId: z.uuid(),
-  code: z
-    .string()
-    .trim()
-    .toUpperCase()
-    .regex(/^[A-Z0-9]{1,16}$/, 'must be 1–16 letters or digits'),
+  code: VoteCode,
   /** Raw sender identifier (phone number, device id). Hashed on arrival, never stored or logged. */
   sender: z.string().trim().min(1).max(256),
   source: VoteSource,
