@@ -39,6 +39,18 @@ services:
       timeout: 5s
       retries: 20
 
+  # One-shot, idempotent: creates the topics (default profile, so host-run services get them too).
+  # 6 partitions caps the consumer group at 6 parallel instances; raising it later remaps keys.
+  topics:
+    image: redpandadata/redpanda:v26.2.3
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        rpk topic create votes.raw votes.dead --if-not-exists -p 6 -r 1 -X brokers=redpanda:9092
+        && rpk topic describe votes.raw -p -X brokers=redpanda:9092
+    depends_on:
+      redpanda: { condition: service_healthy }
+
   postgres:
     image: postgres:18.6-alpine
     environment:
@@ -83,6 +95,9 @@ services:
       <<: *service-env
       # Empty if unset in .env; ingest then refuses to start with a clear error.
       VOTER_HASH_SALT: ${VOTER_HASH_SALT:-}
+    depends_on:
+      redpanda: { condition: service_healthy }
+      topics: { condition: service_completed_successfully }
     build: { context: ., dockerfile: services/ingest/Dockerfile }
     ports: ["4000:4000"]
 

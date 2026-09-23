@@ -4,6 +4,47 @@ Short entries: what was decided, the alternatives, and why. Newest at the bottom
 
 ---
 
+## Changes to the spec and plan
+
+Where the build departs from `SPEC.md` or `IMPLEMENTATION_PLAN.md`, or pins down something they left open in a way that changes a documented contract. Each row's reasoning is in that feature's entries below. `SPEC.md` and `IMPLEMENTATION_PLAN.md` carry a short inline note at each affected spot.
+
+### Changed: the build does something other than the document says
+
+| Area | Spec / plan said | Now | Feature |
+|---|---|---|---|
+| Voter hash (SPEC §5) | `SHA-256` of sender + salt | `HMAC-SHA256`, salt as the key, sender trimmed first | F3 |
+| Idempotency key (SPEC §6, plan F3) | ingest generates one (a UUID) | client `Idempotency-Key` header is honoured; ingest generates a UUID only when absent. Keys are 1–128 visible ASCII, not necessarily UUIDs | F3 |
+| `votes` constraints (SPEC §5) | FK only on `contestants.contest_id` | FKs also on `votes.contest_id`, `votes.contestant_id`, `vote_totals`, `vote_buckets` (no cascades). Contestants with votes can't be deleted, only deactivated | F2 |
+| Ingest `/health` (SPEC §7) | `{ status, redpanda: "connected" }` | `{ status: "ok" \| "degraded", service, redpanda: "connected" \| "disconnected" }`, and **503** while the broker is unreachable | F4 |
+| `votes.dead` topic (plan F6) | built in F6 | created in F4 by the `topics` init job, alongside `votes.raw` | F4 |
+| F1 done-when (plan F1, CLAUDE.md) | `docker compose up` brings everything up | `docker compose up` = infra only; `docker compose --profile app up` = full stack. CLAUDE.md's definition of done updated | F1 |
+| Commits (plan working rules, CLAUDE.md) | commit at each feature boundary, feature number in the message | the user commits, using the project skill `/feature-commit`: `F<n>: subject` plus a what/why body. One exception in history: F3 went in as `a977aca feat(ingest): …`, written with the device-level conventional `commit-msg` skill | F3 |
+| Layout (CLAUDE.md) | no package for the database | new `packages/db` (Drizzle schema, client, migrate, seed). Migrations in `infra/migrations`. CLAUDE.md layout updated | F2 |
+
+### Filled in: the document was silent, and the choice is now part of a contract
+
+| Area | Decision | Feature |
+|---|---|---|
+| Consumer port (SPEC §4 says —) | `4003`, serving `/health` only (later `/metrics`) | F1 |
+| Every service's `/health` | Shared `HealthResponse` in contracts. Web serves it at `/health`, not `/api/health` | F1 |
+| Enum value sets (SPEC §5 says `text`) | `contest_status`, `vote_source`, `dead_letter_reason` are Postgres enums built from Zod enums in contracts | F2 |
+| `dead_letters` columns | `id bigserial`, `payload jsonb`, `reason` enum, `received_at timestamptz` | F2 |
+| Seed | fixed contest ID `0192f3a0-7c1e-7000-8000-00000000c0de`; codes `C1`–`C10`; inserts are `DO NOTHING`, so re-seeding never overwrites edits, status or votes | F2 |
+| Code format (SPEC §6) | ingest trims and uppercases; must match `^[A-Z0-9]{1,16}$` or it gets a 400 | F3 |
+| `POST /votes` responses (SPEC §7) | 202 `{ eventId, idempotencyKey }`; 4xx `{ error, issues: [{ path, message }] }`; 413 over 4 KB; 415 non-JSON; 503 when publishing fails | F3 |
+| `sent_at` (SPEC §6) | set by ingest when it accepts the vote | F3 |
+| Partitions (plan F4 says "several") | 6 on both topics; Java-compatible murmur2 so placement matches rpk and other clients | F4 |
+| What a 202 means | the broker acknowledged the write (`acks=all`); a publish is capped at 5 s, then 503 | F4 |
+| Topic creation | one-shot `rpk` init job; services never create topics (`autocreateTopics: false`) | F4 |
+
+### Outstanding: a rule not met yet
+
+| Rule | Status |
+|---|---|
+| Graceful SIGTERM on every service (CLAUDE.md) | `apps/web` (Next.js standalone) exits 143 without draining. Revisit when web gets API routes (F13/F14) |
+
+---
+
 ## F1 — Compose runs infra by default, the full stack behind a profile
 
 **Decided:** `docker compose up` starts only Redpanda, Postgres and Redis. Services run on the host (`pnpm dev`, `go run`) for fast iteration. `docker compose --profile app up` builds and runs every service in a container for demos, recording, and proving the Dockerfiles.
@@ -111,3 +152,32 @@ Short entries: what was decided, the alternatives, and why. Newest at the bottom
 
 **Decided:** `VotePublisher.publish(event)` must throw unless the event was durably handed off. Until F4, the default implementation logs the event (hash only) at debug and drops it.
 **Why:** the route, validation and privacy guarantees can be finished and tested now, and F4 swaps the implementation without touching the handler.
+
+## F4 — Kafka client: `@platformatic/kafka`
+
+**Decided:** `@platformatic/kafka` 2.x for producing (and later consuming).
+**Alternatives:** kafkajs (last release Feb 2023, unmaintained); `@confluentinc/kafka-javascript` (librdkafka, the most battle-tested engine, but a 14 MB native binary fetched by an install script).
+**Why:** pure JS and actively released, so it works with the `--ignore-scripts` Docker installs, alpine, and a slow link. One gotcha: its *default* partitioner is `murmur2 >>> 0`, which is not Java-compatible. We use its `compatibilityPartitioner` (see the partitioning entry).
+
+## F4 — 202 means the broker has it: `acks=all`, idempotent producer, 5 ms micro-batches
+
+**Decided:** each request awaits the broker ack before replying 202. Concurrent requests are coalesced into one produce call (flush at 500 messages or 5 ms), and each caller settles with its batch. The producer is idempotent, so its own retries can't duplicate messages in the log.
+**Alternatives:** fire-and-forget buffering (fastest, but a crash between 202 and flush loses votes the client thinks were accepted).
+**Why:** "zero loss" and "never drop silently" only hold if a 202 is a durability claim. Batching recovers most of the throughput that per-request acks would cost. F19 will measure it against the p95 < 50 ms target.
+
+## F4 — Partitioning: key = `code`, Java-compatible murmur2, 6 partitions
+
+**Decided:** `votes.raw` and `votes.dead` have 6 partitions (replication 1 locally). Messages are keyed by the canonical code. `compatibilityPartitioner` places keys exactly where the Java client, rpk and franz-go would.
+**Why:** per-contestant ordering needs one partition per code. Standard hashing means placement can be verified with independent tooling. rpk producing the same keys gave the identical mapping: C1→3 C2→5 C3→3 C4→2 C5→0 C6→5 C7→2 C8→2 C9→2 C10→4. 6 partitions allows up to 6 consumers for the KEDA demo.
+**Observed:** with 10 codes the spread is uneven. Partition 2 holds four codes and partition 1 none. With keyed partitioning, a popular contestant makes a hot partition. That's the price of ordering, and it's worth saying out loud in the load-testing write-up.
+
+## F4 — Topics are created by an rpk init job, not by services
+
+**Decided:** a one-shot `topics` Compose service (default profile) runs `rpk topic create … --if-not-exists`. Ingest waits for it and runs with `autocreateTopics: false`. Topic names live in contracts as `TOPICS`.
+**Why:** topic shape (partitions, replication) is infrastructure, like the future Kubernetes Job. Services creating topics would need admin rights on the hot path, and a typo would silently create a new topic.
+
+## F4 — Bounded failure: 5 s publish deadline, broker-aware health
+
+**Decided:** retries back off at 100/200/400/800/1000 ms, with a 1 s connect timeout, and every publish is capped at 5 s, after which the request gets a 503. `/health` does a fresh metadata fetch (`forceUpdate`) and answers 503 `degraded` when the broker is unreachable.
+**Why:** found live, not in tests. With the library's defaults, stopping Redpanda held a vote request for **61.5 s** before the 503: a connection refused fails fast, but a stopped container never answers, so each retry waited out a 5 s connect timeout. The test suite now covers both "refuses" and "never answers". `/health` also kept saying 200 during the outage because metadata came from cache.
+**Consequence, observed:** a publish that times out may still land once the broker returns. In the outage test the 503'd vote *and* its client retry (same `Idempotency-Key`) both reached `votes.raw`. That's correct at-least-once behaviour, and it's exactly why F5's consumer must dedupe on `idempotency_key`.

@@ -1,5 +1,7 @@
 # Tally — Technical Specification
 
+> Notes marked *Changed* or *Decided* show where the build has diverged from or pinned down this spec. The full list, with reasons, is in `DECISIONS.md` under "Changes to the spec and plan".
+
 A real-time voting platform that ingests high-volume vote traffic, aggregates it through a message queue, and displays live results with animated counters.
 
 Portfolio project modelled on a production SMS voting system built for a live televised contest. The telecom SMS feed is replaced by a controllable load generator.
@@ -78,7 +80,7 @@ The analytics consumer runs in a **separate consumer group**, so it reads the sa
 |---|---|---|---|
 | `web` | Next.js / TS | 3000 | Results, admin, generator control UI |
 | `ingest` | Fastify / TS | 4000 | Validate and publish votes |
-| `consumer` | Node / TS | — | Aggregate into Postgres + Redis |
+| `consumer` | Node / TS | 4003 | Aggregate into Postgres + Redis. *Decided (F1): port serves `/health` only* |
 | `gateway` | Node / TS | 4001 | Poll Redis, broadcast over WebSocket |
 | `analytics-consumer` | Node / TS | — | Batch insert into ClickHouse (later) |
 | `generator` | Go | 4002 | Produce synthetic vote load, HTTP control API |
@@ -117,12 +119,12 @@ Infrastructure: Redpanda 9092, PostgreSQL 5432, Redis 6379, ClickHouse 8123.
 | Column | Type | Notes |
 |---|---|---|
 | id | bigserial PK | |
-| contest_id | uuid | |
-| contestant_id | uuid | nullable — null means unresolved |
+| contest_id | uuid FK | *Changed (F2): FK added* |
+| contestant_id | uuid FK | nullable — null means unresolved. *Changed (F2): FK added* |
 | code_submitted | text | raw code as sent |
-| voter_hash | text | SHA-256 of sender identifier + salt. **Never store raw identifiers.** |
-| source | text | `sms` / `web` / `generator` |
-| idempotency_key | text | unique — guards against queue redelivery |
+| voter_hash | text | ~~SHA-256 of sender identifier + salt~~ *Changed (F3):* HMAC-SHA256 of the trimmed sender, keyed by the salt. **Never store raw identifiers.** |
+| source | enum | `sms` / `web` / `generator`. *Decided (F2): Postgres enum built from the contracts Zod enum* |
+| idempotency_key | text | unique — guards against queue redelivery. *Changed (F3): may come from the client's `Idempotency-Key` header, so not always a UUID* |
 | received_at | timestamptz | |
 
 Index on `(contest_id, received_at)` and unique index on `idempotency_key`.
@@ -130,19 +132,21 @@ Index on `(contest_id, received_at)` and unique index on `idempotency_key`.
 ### `vote_totals`
 | Column | Type | Notes |
 |---|---|---|
-| contestant_id | uuid PK | |
+| contestant_id | uuid PK, FK | *Changed (F2): FK added* |
 | total | bigint | |
 | updated_at | timestamptz | |
 
 ### `vote_buckets`
 | Column | Type | Notes |
 |---|---|---|
-| contestant_id | uuid | composite PK |
+| contestant_id | uuid | composite PK, FK. *Changed (F2): FK added* |
 | bucket_minute | timestamptz | composite PK — truncated to the minute |
 | count | integer | |
 
 ### `dead_letters`
 Mirrors the `votes.dead` topic for the admin view: id, raw payload, reason, received_at.
+
+*Decided (F2):* `id bigserial`, `payload jsonb`, `reason` enum (`dead_letter_reason`), `received_at timestamptz`. Contestants with votes can't be deleted because of the FKs, so they are deactivated (`active = false`).
 
 ### Redis keys
 ```
@@ -156,6 +160,8 @@ tally:idem:{key}                  string  TTL 1h, redelivery guard
 ## 6. Event Schema
 
 Topic `votes.raw`, partitioned by `code` so all votes for one contestant stay ordered on one partition.
+
+*Decided (F4):* 6 partitions on both topics, Java-compatible murmur2 key hashing, and topics created by a one-shot `rpk` init job (services never auto-create them). *Decided (F3):* `code` is trimmed and uppercased at ingest and must match `^[A-Z0-9]{1,16}$`. `sent_at` is the time ingest accepted the vote. `idempotency_key` is the client's `Idempotency-Key` header when sent, otherwise a generated UUID.
 
 ```json
 {
@@ -181,10 +187,17 @@ All schemas are defined once as Zod schemas in `packages/contracts` and imported
 ### Ingest
 ```
 POST /votes        { contestId, code, sender, source }  → 202 Accepted
-GET  /health       → { status, redpanda: "connected" }
+GET  /health       → { status, service, redpanda: "connected" }
 GET  /metrics      → Prometheus format
 ```
 Returns 202, not 200 — the vote is accepted for processing, not yet counted. Say this out loud in interviews.
+
+*Decided (F3, F4):*
+- An optional `Idempotency-Key` header (1–128 visible ASCII) becomes the event's idempotency key.
+- 202 → `{ eventId, idempotencyKey }`, sent only after Redpanda acknowledges the write (`acks=all`).
+- 400 → `{ error: "invalid_request", issues: [{ path, message }] }`. 413 for bodies over 4 KB, 415 for non-JSON bodies, and 503 when publishing fails or exceeds 5 s.
+
+*Changed (F4):* `/health` returns `{ status: "ok" | "degraded", service, redpanda: "connected" | "disconnected" }`, with **503** while the broker is unreachable. Every service returns the shared `HealthResponse` (`status`, `service`).
 
 ### Gateway
 ```

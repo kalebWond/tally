@@ -13,6 +13,7 @@
     "typecheck": "tsc -p ."
   },
   "dependencies": {
+    "@platformatic/kafka": "^2.12.0",
     "@tally/contracts": "workspace:*",
     "fastify": "^5.12.5",
     "zod": "^4.6.5"

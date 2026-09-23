@@ -5,7 +5,7 @@ Build one feature per session. Each has a goal, a build list, and a check that d
 **Working rules**
 - One feature per session. Don't start the next until the current one passes its check.
 - Write the check before the code.
-- Commit at every feature boundary, with the feature number in the message.
+- Commit at every feature boundary, with the feature number in the message. *Changed (F3): the user commits, via the project skill `/feature-commit` (`F<n>: subject` plus a detailed body). F3's commit `a977aca` is the one conventional-format exception.*
 - Log every non-obvious choice in `DECISIONS.md` — that file becomes the case study and the interview prep.
 - Anything the spec doesn't cover is a question, not a guess.
 
@@ -17,11 +17,15 @@ Build one feature per session. Each has a goal, a build list, and a check that d
 
 **Done when:** `docker compose up` brings the infrastructure up and every service's `/health` returns 200.
 
+*Changed (F1):* `docker compose up` runs infrastructure only; `docker compose --profile app up` runs the full stack. `scripts/check-health.sh` is the check.
+
 ---
 
 ## F2 — Database schema and seed
 
 **Build:** Drizzle migrations for `contests`, `contestants`, `votes`, `vote_totals`, `vote_buckets`, `dead_letters`. Seed script creating one open contest with 8–12 contestants and short codes.
+
+*Decided (F2):* schema lives in a new `packages/db`, and migrations in `infra/migrations`. A one-shot `migrate` job (migrate + seed) runs in the `app` profile. FKs were added on `votes`, `vote_totals` and `vote_buckets`.
 
 **Done when:** Migrations run from empty, the seed populates, and re-running the seed is safe.
 
@@ -31,6 +35,8 @@ Build one feature per session. Each has a goal, a build list, and a check that d
 
 **Build:** `POST /votes` with Zod validation from `packages/contracts`. Hash the sender with a salt from the environment. Generate an idempotency key. Return 202. No database access.
 
+*Changed (F3):* the hash is HMAC-SHA256, and a client `Idempotency-Key` header is honoured before generating one.
+
 **Done when:** Valid payloads return 202, malformed ones return 400 with a useful message, and no raw sender identifier appears anywhere in logs or storage.
 
 ---
@@ -38,6 +44,8 @@ Build one feature per session. Each has a goal, a build list, and a check that d
 ## F4 — Publish to Redpanda
 
 **Build:** Create `votes.raw` with several partitions. Producer keyed on `code`. Retry with backoff. Ingest publishes and returns.
+
+*Decided (F4):* 6 partitions, created (with `votes.dead`) by an `rpk` init job. 202 only after the broker acknowledges (`acks=all`, 5 ms micro-batches). Each publish is capped at 5 s, then 503. `/health` reports Redpanda status.
 
 **Done when:** A posted vote appears on the topic (verify with `rpk topic consume`), and votes for the same code consistently land on the same partition.
 
@@ -54,6 +62,8 @@ Build one feature per session. Each has a goal, a build list, and a check that d
 ## F6 — Dead-letter handling
 
 **Build:** Unresolvable codes go to `votes.dead` with a reason, and are mirrored into the `dead_letters` table.
+
+*Changed (F4):* the `votes.dead` topic already exists (created by the F4 `topics` job). F6 only needs to produce to it and write `dead_letters`.
 
 **Done when:** A vote for a nonexistent code lands in the dead-letter topic with a reason and does not affect any total.
 

@@ -7,6 +7,7 @@ import type { VotePublisher } from './publisher.js';
 
 // F3 done-when: valid payloads → 202, malformed → 400 with a useful message,
 // and no raw sender identifier appears in logs, responses or published events.
+// The publisher is stubbed here; kafka-publisher.test.ts covers the real one (F4).
 
 const SALT = 'test-salt-0123456789abcdef';
 const CONTEST_ID = '0192f3a0-7c1e-7000-8000-00000000c0de';
@@ -29,6 +30,7 @@ function setup(publisher?: VotePublisher) {
         published.push(event);
       },
     },
+    isReady: async () => true,
     logStream: stream,
   });
 }
@@ -47,10 +49,30 @@ beforeEach(() => {
 });
 
 describe('GET /health', () => {
-  it('returns 200 with the shared health contract', async () => {
-    const res = await setup().inject({ method: 'GET', url: '/health' });
+  const withBroker = (ready: boolean) =>
+    buildApp({
+      config: { LOG_LEVEL: 'fatal', VOTER_HASH_SALT: SALT },
+      publisher: { publish: async () => {} },
+      isReady: async () => ready,
+    });
+
+  it('200 and redpanda "connected" when the broker answers', async () => {
+    const res = await withBroker(true).inject({ method: 'GET', url: '/health' });
     expect(res.statusCode).toBe(200);
-    expect(HealthResponse.parse(res.json())).toEqual({ status: 'ok', service: 'ingest' });
+    expect(HealthResponse.parse(res.json())).toEqual({
+      status: 'ok',
+      service: 'ingest',
+      redpanda: 'connected',
+    });
+  });
+
+  it('503 and "degraded" when the broker is unreachable, so traffic is routed away', async () => {
+    const res = await withBroker(false).inject({ method: 'GET', url: '/health' });
+    expect(res.statusCode).toBe(503);
+    expect(HealthResponse.parse(res.json())).toMatchObject({
+      status: 'degraded',
+      redpanda: 'disconnected',
+    });
   });
 });
 
@@ -163,7 +185,7 @@ describe('sender privacy', () => {
       post(app, { ...valid, sender: ` ${sender} ` }),
       post(app, { ...valid, sender, code: 'C7!!' }),
       post(app, { ...valid, sender, source: 'fax' }),
-      post(app, `{"sender": "${sender}", "code": }`), // malformed JSON: V8's message quotes the input
+      post(app, `{"sender": "${sender}", "code": }`), // malformed JSON: a parser error could quote the input
       post(app, { ...valid, sender: sender.repeat(40) }), // too long
       post(app, { ...valid, sender: sender.repeat(1_000) }), // body too large
     ]);

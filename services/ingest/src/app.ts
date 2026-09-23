@@ -12,14 +12,15 @@ import Fastify, { type FastifyError } from 'fastify';
 import type { z } from 'zod';
 import type { Config } from './config.js';
 import { hashSender } from './hash.js';
-import { logPublisher, type VotePublisher } from './publisher.js';
+import type { VotePublisher } from './publisher.js';
 
 const BODY_LIMIT_BYTES = 4096;
 
 interface Deps {
   config: Pick<Config, 'LOG_LEVEL' | 'VOTER_HASH_SALT'>;
-  /** Defaults to the logging placeholder until F4 supplies the Redpanda producer. */
-  publisher?: VotePublisher;
+  publisher: VotePublisher;
+  /** Whether the broker answers and the topic exists; drives `/health`. */
+  isReady: () => Promise<boolean>;
   /** Tests capture log output here. */
   logStream?: Writable;
 }
@@ -32,7 +33,7 @@ const reject = (error: string, message: string): ErrorResponse => ({
   issues: [{ path: '', message }],
 });
 
-export function buildApp({ config, publisher, logStream }: Deps) {
+export function buildApp({ config, publisher, isReady, logStream }: Deps) {
   const app = Fastify({
     bodyLimit: BODY_LIMIT_BYTES,
     logger: {
@@ -42,7 +43,6 @@ export function buildApp({ config, publisher, logStream }: Deps) {
       ...(logStream && { stream: logStream }),
     },
   });
-  const votes = publisher ?? logPublisher(app.log);
   // JSON only: anything else is a clear 415 rather than a confusing schema error.
   app.removeContentTypeParser('text/plain');
 
@@ -71,7 +71,14 @@ export function buildApp({ config, publisher, logStream }: Deps) {
     return reply.code(500).send(reject('internal', 'unexpected error'));
   });
 
-  app.get('/health', async (): Promise<HealthResponse> => ({ status: 'ok', service: 'ingest' }));
+  app.get('/health', async (_req, reply) => {
+    const connected = await isReady();
+    return reply.code(connected ? 200 : 503).send({
+      status: connected ? 'ok' : 'degraded',
+      service: 'ingest',
+      redpanda: connected ? 'connected' : 'disconnected',
+    } satisfies HealthResponse);
+  });
 
   app.post('/votes', async (req, reply) => {
     const body = VoteRequest.safeParse(req.body);
@@ -100,7 +107,7 @@ export function buildApp({ config, publisher, logStream }: Deps) {
     };
 
     try {
-      await votes.publish(event);
+      await publisher.publish(event);
     } catch (err) {
       // Never a silent 202: the client gets a retryable failure and keeps the vote.
       req.log.error({ err, eventId: event.event_id }, 'publish failed');

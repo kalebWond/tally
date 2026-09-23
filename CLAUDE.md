@@ -24,7 +24,7 @@ Full detail lives in `SPEC.md`. Build order lives in `IMPLEMENTATION_PLAN.md`. D
 
 **Log decisions.** Anything non-obvious goes in `DECISIONS.md` as a short entry: what was decided, what the alternatives were, why. This file becomes the case study and interview prep, so it matters.
 
-**Commit per feature.** Message format: `F7: realtime gateway`.
+**Commit per feature.** Message format: `F7: realtime gateway`, plus a what/why bullet body. The user commits, using `/feature-commit` (`.claude/skills/feature-commit`).
 
 ---
 
@@ -46,7 +46,7 @@ TypeScript everywhere except the load generator, which is Go.
 
 - `docker compose up -d` starts infrastructure only (Redpanda, Postgres, Redis). Run services on the host with `pnpm dev` (TS) and `go run .` in `tools/generator`. Host services read `.env` (copy from `.env.example`).
 - `docker compose --profile app up -d --build` runs the full stack in containers. Use it for demos, recordings, and checking the Dockerfiles.
-- Redpanda: containers use `redpanda:9092`, the host uses `localhost:19092`.
+- Redpanda: containers use `redpanda:9092`, the host uses `localhost:19092`. A one-shot `topics` job creates `votes.raw` and `votes.dead` (6 partitions each) on every `docker compose up`. Inspect with `docker compose exec redpanda rpk topic consume votes.raw -o start`.
 - `pnpm db:migrate` / `pnpm db:seed` on the host (both idempotent). After a schema change, run `pnpm db:generate` and commit the SQL in `infra/migrations`. The `app` profile runs a one-shot `migrate` job (migrate + seed) before consumer and web.
 - `pnpm lint` (Biome), `pnpm typecheck`, `pnpm test` (Vitest), `pnpm check:health`.
 - Every new service gets its own Dockerfile and a compose entry under the `app` profile when it's created.
@@ -119,8 +119,8 @@ A feature is done when its check in `IMPLEMENTATION_PLAN.md` passes, tests cover
 
 Update this section as you go.
 
-**Last completed:** F3, ingest API (2026-09-23)
-**Next up:** F4, publish to Redpanda (replace `logPublisher` in `services/ingest/src/publisher.ts`)
+**Last completed:** F4, publish to Redpanda (2026-09-23)
+**Next up:** F5, consumer and totals. `votes.raw` already holds duplicates by `idempotency_key` from outage testing, which makes good dedupe fixtures.
 
 **Seed contest:** `0192f3a0-7c1e-7000-8000-00000000c0de`, codes `C1`–`C10`.
 
