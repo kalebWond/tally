@@ -145,6 +145,8 @@ Index on `(contest_id, received_at)` and unique index on `idempotency_key`.
 | bucket_minute | timestamptz | composite PK — truncated to the minute |
 | count | integer | |
 
+*Decided (F17):* the minute is when ingest accepted the vote (`received_at`), not when it was processed; buckets are written in the batch transaction from newly inserted votes only, so they always sum to `vote_totals`.
+
 ### `dead_letters`
 Mirrors the `votes.dead` topic for the admin view: id, raw payload, reason, received_at. *Changed (F15):* also `contest_id` (nullable, no FK) for filtering, indexed with reason and id.
 
@@ -214,6 +216,8 @@ WS /live?contestId=...
 Only changed contestants are sent after the initial snapshot.
 
 *Decided (F7):* both frames also carry `contestId`, `totalVotes` and `ts`. Totals are `[{ contestantId, total }]` with **absolute** values, and `changed` holds only contestants whose total differs from the previous frame. Close codes: `4400` invalid `contestId`, `1001` shutdown. Redis is polled once per watched contest every 250 ms. Contestant names and colours come from the web app, not the gateway. `GET /debug` serves a dev inspector page.
+
+*Changed (F17):* snapshots and updates also carry `minutes` (`{ minute, count }`, the contest's votes per minute: the whole 30-minute window in a snapshot, changed minutes in an update) and `minutesTo` (the window's last minute).
 
 *Changed (F16):* snapshots and updates also carry `status` (the contest's status, or null when Redis doesn't have it); a status change alone sends an update.
 

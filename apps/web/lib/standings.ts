@@ -1,4 +1,4 @@
-import type { ContestStatus, LiveMessage } from '@tally/contracts';
+import { type ContestStatus, type LiveMessage, MINUTES_WINDOW } from '@tally/contracts';
 
 /** A contestant's display details, loaded from Postgres by the server component. */
 export interface Entrant {
@@ -19,6 +19,10 @@ export interface Totals {
   totalVotes: number;
   /** Contest status from the gateway; null = not known there, use the server-rendered one. */
   status: ContestStatus | null;
+  /** Minute start (epoch ms) → contest votes that minute, within the gateway's window (F17). */
+  minutes: ReadonlyMap<number, number>;
+  /** The window's last minute; null before the first snapshot. */
+  minutesTo: number | null;
 }
 
 export interface Standing extends Entrant {
@@ -27,7 +31,15 @@ export interface Standing extends Entrant {
   rank: number;
 }
 
-export const emptyTotals = (): Totals => ({ totals: new Map(), totalVotes: 0, status: null });
+export const emptyTotals = (): Totals => ({
+  totals: new Map(),
+  totalVotes: 0,
+  status: null,
+  minutes: new Map(),
+  minutesTo: null,
+});
+
+const MINUTE = 60_000;
 
 /** Snapshots replace everything; updates overwrite only the contestants they name; heartbeats change nothing. */
 export function applyFrame(state: Totals, frame: LiveMessage): Totals {
@@ -37,11 +49,23 @@ export function applyFrame(state: Totals, frame: LiveMessage): Totals {
       totals: new Map(frame.totals.map((t) => [t.contestantId, t.total])),
       totalVotes: frame.totalVotes,
       status: frame.status,
+      minutes: new Map(frame.minutes.map((m) => [m.minute, m.count])),
+      minutesTo: frame.minutesTo,
     };
   }
   const totals = new Map(state.totals);
   for (const t of frame.changed) totals.set(t.contestantId, t.total);
-  return { totals, totalVotes: frame.totalVotes, status: frame.status };
+  // Minutes that slid out of the window are dropped, so the map never grows past it.
+  const from = frame.minutesTo - (MINUTES_WINDOW - 1) * MINUTE;
+  const minutes = new Map([...state.minutes].filter(([m]) => m >= from));
+  for (const m of frame.minutes) minutes.set(m.minute, m.count);
+  return {
+    totals,
+    totalVotes: frame.totalVotes,
+    status: frame.status,
+    minutes,
+    minutesTo: frame.minutesTo,
+  };
 }
 
 const byCode = new Intl.Collator('en', { numeric: true }).compare;
@@ -71,4 +95,23 @@ export function rank(
 export function unknownIds(entrants: readonly Entrant[], totals: ReadonlyMap<string, number>) {
   const known = new Set(entrants.map((e) => e.id));
   return [...totals.keys()].filter((id) => !known.has(id));
+}
+
+/**
+ * The chart's points: one per minute across the window ending at `minutesTo`, a minute with no
+ * votes as 0 rather than a gap. Starts at the contest's opening minute when that is later, so
+ * a contest opened 5 minutes ago shows 5 minutes, not 25 empty ones before it.
+ */
+export function minuteSeries(
+  minutes: ReadonlyMap<number, number>,
+  minutesTo: number,
+  opensAt: number | null = null,
+): { minute: number; count: number }[] {
+  const windowStart = minutesTo - (MINUTES_WINDOW - 1) * MINUTE;
+  const opened = opensAt === null ? windowStart : Math.floor(opensAt / MINUTE) * MINUTE;
+  const start = Math.min(minutesTo, Math.max(windowStart, opened));
+  const points = [];
+  for (let m = start; m <= minutesTo; m += MINUTE)
+    points.push({ minute: m, count: minutes.get(m) ?? 0 });
+  return points;
 }

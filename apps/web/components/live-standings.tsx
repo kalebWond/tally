@@ -9,9 +9,10 @@ import { type Entrant, rank, unknownIds } from '@/lib/standings';
 import { AnimatedNumber } from './animated-number';
 import { ContestantRow } from './contestant-row';
 import { type ConnectionState, useLiveTotals } from './use-live-totals';
+import { VotesPerMinute } from './votes-per-minute';
 
 interface Props {
-  contest: { id: string; name: string; status: ContestStatus };
+  contest: { id: string; name: string; status: ContestStatus; opensAt: string | null };
   entrants: Entrant[];
   gatewayUrl: string;
 }
@@ -114,10 +115,8 @@ function useMovements(orderKey: string) {
 }
 
 export function LiveStandings({ contest, entrants, gatewayUrl }: Props) {
-  const { totals, totalVotes, status, connection, synced, retryAt } = useLiveTotals(
-    gatewayUrl,
-    contest.id,
-  );
+  const { totals, totalVotes, status, minutes, minutesTo, connection, synced, retryAt } =
+    useLiveTotals(gatewayUrl, contest.id);
   // The gateway's status (F16) wins, so a close shows without a reload; it is null when Redis
   // doesn't know, and then the status this page was rendered with stands.
   const contestStatus = status ?? contest.status;
@@ -182,6 +181,15 @@ export function LiveStandings({ contest, entrants, gatewayUrl }: Props) {
             />
           ))}
         </ol>
+
+        {synced && minutesTo !== null && (
+          <VotesPerMinute
+            minutes={minutes}
+            minutesTo={minutesTo}
+            opensAt={contest.opensAt ? Date.parse(contest.opensAt) : null}
+            live={contestStatus === 'open'}
+          />
+        )}
 
         <footer className="board-foot" data-testid="board-foot">
           {FOOTER[contestStatus]}

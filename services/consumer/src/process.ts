@@ -1,6 +1,6 @@
 import { type DeadLetterEvent, type DeadLetterReason, VoteEvent } from '@tally/contracts';
 import { acceptsVoteAt, type Db, schema } from '@tally/db';
-import { inArray, sql } from 'drizzle-orm';
+import { and, inArray, sql } from 'drizzle-orm';
 import type { DeadLetterPublisher } from './dead-letter-publisher.js';
 import type { Resolver } from './resolver.js';
 import type { ContestTotals, TotalsStore } from './totals-store.js';
@@ -139,7 +139,10 @@ export async function processBatch(messages: InboundMessage[], deps: Deps): Prom
           .insert(schema.votes)
           .values(votes)
           .onConflictDoNothing({ target: schema.votes.idempotencyKey })
-          .returning({ contestantId: schema.votes.contestantId })
+          .returning({
+            contestantId: schema.votes.contestantId,
+            receivedAt: schema.votes.receivedAt,
+          })
       : [];
 
     const increments = new Map<string, number>();
@@ -156,6 +159,30 @@ export async function processBatch(messages: InboundMessage[], deps: Deps): Prom
             total: sql`${schema.voteTotals.total} + excluded.total`,
             updatedAt: sql`now()`,
           },
+        });
+    }
+
+    // Per-minute buckets (F17), from newly inserted votes only, like totals: a duplicate adds
+    // nothing. The minute is when ingest accepted the vote, so a replay files it identically.
+    const perMinute = new Map<
+      string,
+      { contestantId: string; bucketMinute: Date; count: number }
+    >();
+    for (const { contestantId, receivedAt } of inserted) {
+      if (!contestantId) continue;
+      const bucketMinute = minuteOf(receivedAt);
+      const key = `${contestantId}|${bucketMinute.getTime()}`;
+      const entry = perMinute.get(key) ?? { contestantId, bucketMinute, count: 0 };
+      entry.count++;
+      perMinute.set(key, entry);
+    }
+    if (perMinute.size) {
+      await tx
+        .insert(schema.voteBuckets)
+        .values([...perMinute.values()])
+        .onConflictDoUpdate({
+          target: [schema.voteBuckets.contestantId, schema.voteBuckets.bucketMinute],
+          set: { count: sql`${schema.voteBuckets.count} + excluded.count` },
         });
     }
 
@@ -188,9 +215,12 @@ export async function processBatch(messages: InboundMessage[], deps: Deps): Prom
     // Absolute totals for every contestant this batch touched, duplicates included: a pure
     // replay inserts nothing but must still repair Redis.
     const touched = [...new Set(votes.map((v) => v.contestantId).filter((id) => id != null))];
+    const touchedMinutes = [
+      ...new Set(votes.map((v) => minuteOf(v.receivedAt as Date).getTime())),
+    ].map((ms) => new Date(ms));
     return {
       counted: inserted.length,
-      updates: touched.length ? await readTotals(tx, touched) : [],
+      updates: touched.length ? await readTotals(tx, touched, touchedMinutes) : [],
       deadEvents,
       votes,
     };
@@ -205,7 +235,13 @@ export async function processBatch(messages: InboundMessage[], deps: Deps): Prom
 
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 
-async function readTotals(tx: Tx, contestantIds: string[]): Promise<ContestTotals[]> {
+const minuteOf = (d: Date) => new Date(Math.floor(d.getTime() / 60_000) * 60_000);
+
+async function readTotals(
+  tx: Tx,
+  contestantIds: string[],
+  minutes: Date[],
+): Promise<ContestTotals[]> {
   const { contestants, voteTotals } = schema;
   const rows = await tx
     .select({
@@ -236,9 +272,31 @@ async function readTotals(tx: Tx, contestantIds: string[]): Promise<ContestTotal
       contestId: r.contestId,
       totals: new Map<string, number>(),
       totalVotes: r.contestTotal,
+      minutes: new Map<number, number>(),
     };
     if (wanted.has(r.contestantId)) entry.totals.set(r.contestantId, r.total);
     byContest.set(r.contestId, entry);
+  }
+
+  // Absolute per-minute counts for the minutes this batch touched, contest-wide.
+  if (minutes.length && byContest.size) {
+    const { voteBuckets } = schema;
+    const rows = await tx
+      .select({
+        contestId: contestants.contestId,
+        minute: voteBuckets.bucketMinute,
+        count: sql<number>`sum(${voteBuckets.count})::int`,
+      })
+      .from(voteBuckets)
+      .innerJoin(contestants, sql`${contestants.id} = ${voteBuckets.contestantId}`)
+      .where(
+        and(
+          inArray(contestants.contestId, [...byContest.keys()]),
+          inArray(voteBuckets.bucketMinute, minutes),
+        ),
+      )
+      .groupBy(contestants.contestId, voteBuckets.bucketMinute);
+    for (const r of rows) byContest.get(r.contestId)?.minutes.set(r.minute.getTime(), r.count);
   }
   return [...byContest.values()];
 }

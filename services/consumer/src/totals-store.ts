@@ -7,6 +7,8 @@ export interface ContestTotals {
   totals: Map<string, number>;
   /** Sum across the contest, as committed in Postgres. */
   totalVotes: number;
+  /** Minute start (epoch ms) → the contest's votes in that minute, for the minutes this batch touched. */
+  minutes: Map<number, number>;
 }
 
 // Sets each field to the given absolute value only if it is higher than what Redis holds.
@@ -32,9 +34,19 @@ export function createTotalsStore(redis: Redis) {
       if (updates.length === 0) return;
       const now = String(Date.now());
       const pipeline = redis.pipeline();
-      for (const { contestId, totals, totalVotes } of updates) {
+      for (const { contestId, totals, totalVotes, minutes } of updates) {
         const args = [...totals].flatMap(([id, total]) => [id, String(total)]);
         pipeline.eval(SET_IF_HIGHER, 1, redisKeys.totals(contestId), ...args);
+        if (minutes.size) {
+          const perMinute = [...minutes].flatMap(([minute, count]) => [
+            String(minute),
+            String(count),
+          ]);
+          pipeline.eval(SET_IF_HIGHER, 1, redisKeys.minutes(contestId), ...perMinute);
+          // Where a closed contest's chart window ends (F17).
+          const latest = String(Math.max(...minutes.keys()));
+          pipeline.eval(SET_IF_HIGHER, 1, redisKeys.meta(contestId), 'lastMinute', latest);
+        }
         pipeline.eval(
           SET_IF_HIGHER,
           1,

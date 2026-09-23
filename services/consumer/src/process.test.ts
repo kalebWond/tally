@@ -61,7 +61,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await stores.db.execute(sql`truncate votes, vote_totals, dead_letters`);
+  await stores.db.execute(sql`truncate votes, vote_totals, vote_buckets, dead_letters`);
   await stores.redis.flushdb();
   deadPublished = [];
 });
@@ -132,7 +132,7 @@ describe('processBatch', () => {
 
     // A stale writer (e.g. a consumer mid-rebalance) tries to set an older, smaller total.
     await createTotalsStore(stores.redis).apply([
-      { contestId: CONTEST_ID, totals: new Map([[c1.id, 3]]), totalVotes: 3 },
+      { contestId: CONTEST_ID, totals: new Map([[c1.id, 3]]), totalVotes: 3, minutes: new Map() },
     ]);
 
     expect(Number(await stores.redis.hget(redisKeys.totals(CONTEST_ID), c1.id))).toBe(10);
@@ -257,5 +257,77 @@ describe('processBatch — votes.dead (F6)', () => {
     expect(second?.idempotency_key).toBe(first?.idempotency_key);
     expect(second?.failed_at).toBe(first?.failed_at);
     expect((await snapshot()).dead).toBe(1);
+  });
+});
+
+describe('processBatch — minute buckets (F17)', () => {
+  const at = (iso: string) => ({ sent_at: iso });
+
+  async function bucketCheck() {
+    const { rows } = await stores.db.execute<{
+      mismatched: number;
+      buckets: number;
+      totals: number;
+    }>(sql`
+      select
+        (select count(*)::int from vote_totals t
+           where t.total <> (select coalesce(sum(b.count), 0) from vote_buckets b where b.contestant_id = t.contestant_id)) as mismatched,
+        (select coalesce(sum(count), 0)::int from vote_buckets) as buckets,
+        (select coalesce(sum(total), 0)::int from vote_totals) as totals`);
+    return rows[0];
+  }
+
+  it('files each vote under the minute ingest accepted it, and buckets sum to the totals', async () => {
+    await processBatch(
+      asMessages([
+        voteEvent('C1', at('2026-09-23T20:00:59.999Z')),
+        voteEvent('C1', at('2026-09-23T20:01:00.000Z')),
+        voteEvent('C2', at('2026-09-23T20:01:30.000Z')),
+      ]),
+      deps(),
+    );
+    const buckets = await stores.db
+      .select({ minute: schema.voteBuckets.bucketMinute, count: schema.voteBuckets.count })
+      .from(schema.voteBuckets);
+    const byMinute = new Map<string, number>();
+    for (const b of buckets)
+      byMinute.set(b.minute.toISOString(), (byMinute.get(b.minute.toISOString()) ?? 0) + b.count);
+    expect(Object.fromEntries(byMinute)).toEqual({
+      '2026-09-23T20:00:00.000Z': 1,
+      '2026-09-23T20:01:00.000Z': 2,
+    });
+    expect(await bucketCheck()).toEqual({ mismatched: 0, buckets: 3, totals: 3 });
+  });
+
+  it('duplicates and replays add nothing to buckets; Redis per-minute counts match Postgres', async () => {
+    const events = Array.from({ length: 300 }, (_, i) =>
+      voteEvent(
+        CODES[i % CODES.length] ?? 'C1',
+        at(new Date(Date.UTC(2026, 8, 23, 21, i % 3, 10)).toISOString()),
+      ),
+    );
+    const batch = asMessages([...events, ...events.slice(0, 50)]); // client retries inside the batch
+    await processBatch(batch, deps());
+    await processBatch(batch, deps()); // redelivery
+
+    expect(await bucketCheck()).toEqual({ mismatched: 0, buckets: 300, totals: 300 });
+    const redisMinutes = await stores.redis.hgetall(redisKeys.minutes(CONTEST_ID));
+    expect(redisMinutes).toEqual({
+      [String(Date.UTC(2026, 8, 23, 21, 0))]: '100',
+      [String(Date.UTC(2026, 8, 23, 21, 1))]: '100',
+      [String(Date.UTC(2026, 8, 23, 21, 2))]: '100',
+    });
+  });
+
+  it('a redelivered batch repairs a per-minute count Redis lost', async () => {
+    const batch = asMessages(
+      Array.from({ length: 5 }, () => voteEvent('C4', at('2026-09-23T22:00:05Z'))),
+    );
+    await processBatch(batch, deps());
+    await stores.redis.del(redisKeys.minutes(CONTEST_ID));
+    await processBatch(batch, deps());
+    expect(
+      await stores.redis.hget(redisKeys.minutes(CONTEST_ID), String(Date.UTC(2026, 8, 23, 22, 0))),
+    ).toBe('5');
   });
 });

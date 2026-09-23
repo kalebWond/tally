@@ -179,6 +179,8 @@ Build one feature per session. Each has a goal, a build list, and a check that d
 
 **Build:** Consumer also increments `vote_buckets` for the current minute. Recharts line or area chart of votes per minute on the results page.
 
+*Changed (F17):* the minute is the vote's acceptance minute, not the processing minute; per-minute counts reach the page through Redis and the gateway; the chart shows total votes per minute for the last 30 minutes under the standings. Also added: the consumer rebuilds Redis from Postgres at startup. Verified: buckets = totals = votes (972,856), the run's buckets = accepted (162,263).
+
 **Done when:** The chart fills in live during a run and bucket sums reconcile with the totals.
 
 ---

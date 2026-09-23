@@ -19,12 +19,29 @@ export type LiveTotal = z.infer<typeof LiveTotal>;
  */
 const LiveStatus = ContestStatus.nullable();
 
+/** The contest's votes in one minute (F17), keyed by the minute's start, epoch ms. */
+export const LiveMinute = z.object({
+  minute: z.number().int(),
+  count: z.number().int().nonnegative(),
+});
+export type LiveMinute = z.infer<typeof LiveMinute>;
+
+/** Minutes the per-minute chart shows, ending at `minutesTo`. */
+export const MINUTES_WINDOW = 30;
+
 export const LiveSnapshot = z.object({
   type: z.literal('snapshot'),
   contestId: z.uuid(),
   totals: z.array(LiveTotal),
   totalVotes: z.number().int().nonnegative(),
   status: LiveStatus,
+  /** Per-minute counts in the window (minutes with none are omitted). */
+  minutes: z.array(LiveMinute),
+  /**
+   * The window's last minute: the current one, or for a closed contest the last minute that
+   * had votes, so its chart doesn't scroll away into empty time.
+   */
+  minutesTo: z.number().int(),
   /** Server time of the read, epoch ms. */
   ts: z.number().int(),
 });
@@ -38,6 +55,9 @@ export const LiveUpdate = z.object({
   totalVotes: z.number().int().nonnegative(),
   /** Sent on every update; a status change alone also produces one (with `changed` empty). */
   status: LiveStatus,
+  /** Only the minutes whose count changed. Minutes before `minutesTo - MINUTES_WINDOW + 1` drop out. */
+  minutes: z.array(LiveMinute),
+  minutesTo: z.number().int(),
   ts: z.number().int(),
 });
 export type LiveUpdate = z.infer<typeof LiveUpdate>;

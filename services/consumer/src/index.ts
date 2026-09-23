@@ -6,6 +6,8 @@ import { pino } from 'pino';
 import { loadConfig } from './config.js';
 import { createVoteConsumer } from './consumer.js';
 import { createHealthServer } from './health.js';
+import { resyncRedis } from './resync.js';
+import { createTotalsStore } from './totals-store.js';
 
 /** Totals consumer group. Offsets, lag and (later) KEDA scaling are tracked under this name. */
 const GROUP_ID = 'tally-consumer';
@@ -38,6 +40,9 @@ const server = createHealthServer(async () => ({
   redis: await probe(() => redis.ping()),
 }));
 server.listen(config.PORT, '0.0.0.0', () => log.info({ port: config.PORT }, 'consumer listening'));
+
+// Redis must be rebuildable from Postgres: mirror what Postgres holds before consuming.
+log.info(await resyncRedis(db, createTotalsStore(redis)), 'redis resynced from postgres');
 
 await consumer.start();
 log.info({ topic: TOPICS.raw, group: GROUP_ID }, 'consuming');

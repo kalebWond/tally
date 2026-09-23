@@ -19,7 +19,7 @@ export default async function ResultsPage(props: PageProps<'/results/[contestId]
 
   return (
     <LiveStandings
-      contest={contest}
+      contest={{ ...contest, opensAt: contest.opensAt?.toISOString() ?? null }}
       entrants={entrants}
       gatewayUrl={serverEnv().GATEWAY_PUBLIC_URL}
     />

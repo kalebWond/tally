@@ -74,6 +74,12 @@ afterEach(async () => {
   await gateway.close();
 });
 
+/** Tests that compute "the current minute" themselves wait out a minute's last 5 s, so the gateway agrees. */
+async function awayFromMinuteEdge() {
+  const intoMinute = Date.now() % 60_000;
+  if (intoMinute > 55_000) await new Promise((r) => setTimeout(r, 60_000 - intoMinute + 50));
+}
+
 describe('gateway /live', () => {
   it('sends a full snapshot on connect', async () => {
     await setTotals({ [A]: 10, [B]: 4 });
@@ -96,12 +102,17 @@ describe('gateway /live', () => {
     const before = connect();
     await until(() => before.frames.length === 1);
     expect(before.frames[0]?.msg).toMatchObject({ type: 'snapshot', status: null });
-    before.ws.close();
 
     await redis.hset(redisKeys.meta(CONTEST), 'status', 'open');
+    // Once the room has polled the new status, a newcomer's snapshot carries it. (Joining a room
+    // before its next poll gives the room's current state, which that poll then updates.)
+    await until(() =>
+      before.frames.some(({ msg }) => msg.type === 'update' && msg.status === 'open'),
+    );
     const after = connect();
     await until(() => after.frames.length === 1);
     expect(after.frames[0]?.msg).toMatchObject({ type: 'snapshot', status: 'open' });
+    before.ws.close();
     after.ws.close();
   });
 
@@ -116,6 +127,59 @@ describe('gateway /live', () => {
     expect(client.frames[1]?.msg).toMatchObject({ type: 'update', changed: [], status: 'closed' });
     client.ws.close();
   });
+
+  it('snapshot carries the last 30 minutes, ending at the current minute while the contest is live', async () => {
+    await awayFromMinuteEdge();
+    const now = Math.floor(Date.now() / 60_000) * 60_000;
+    await setTotals({ [A]: 1 });
+    await redis.hset(redisKeys.minutes(CONTEST), {
+      [now]: 7,
+      [now - 60_000]: 5,
+      [now - 29 * 60_000]: 2,
+      [now - 30 * 60_000]: 99, // just outside the window
+    });
+    const client = connect();
+    await until(() => client.frames.length === 1);
+    const snap = client.frames[0]?.msg;
+    expect(snap).toMatchObject({ type: 'snapshot', minutesTo: now });
+    expect(snap?.type === 'snapshot' && snap.minutes).toEqual(
+      expect.arrayContaining([
+        { minute: now, count: 7 },
+        { minute: now - 60_000, count: 5 },
+        { minute: now - 29 * 60_000, count: 2 },
+      ]),
+    );
+    expect(snap?.type === 'snapshot' && snap.minutes).toHaveLength(3);
+    client.ws.close();
+  }, 15_000);
+
+  it('a closed contest keeps its window on its last minute with votes, not on the clock', async () => {
+    const lastMinute = Math.floor(Date.now() / 60_000) * 60_000 - 90 * 60_000;
+    await redis.hset(redisKeys.minutes(CONTEST), { [lastMinute]: 4 });
+    await redis.hset(redisKeys.meta(CONTEST), { status: 'closed', lastMinute });
+    const client = connect();
+    await until(() => client.frames.length === 1);
+    expect(client.frames[0]?.msg).toMatchObject({
+      minutesTo: lastMinute,
+      minutes: [{ minute: lastMinute, count: 4 }],
+    });
+    client.ws.close();
+  });
+
+  it('updates carry only the minutes whose count changed', async () => {
+    await awayFromMinuteEdge();
+    const now = Math.floor(Date.now() / 60_000) * 60_000;
+    await setTotals({ [A]: 1 });
+    await redis.hset(redisKeys.minutes(CONTEST), { [now]: 1, [now - 60_000]: 3 });
+    const client = connect();
+    await until(() => client.frames.length === 1);
+
+    await redis.hset(redisKeys.minutes(CONTEST), { [now]: 2 });
+    await until(() => client.frames.some((f) => f.msg.type === 'update'));
+    const update = client.frames.find((f) => f.msg.type === 'update')?.msg;
+    expect(update?.type === 'update' && update.minutes).toEqual([{ minute: now, count: 2 }]);
+    client.ws.close();
+  }, 15_000);
 
   it('update frames carry only the contestants that changed', async () => {
     await setTotals({ [A]: 10, [B]: 4 });
@@ -143,7 +207,16 @@ describe('gateway /live', () => {
       await setTotals({ [A]: i });
       await sleep(POLL_MS * 2);
     }
-    await until(() => one.frames.length === 6 && two.frames.length === 6);
+    // Wait for the final total, not a frame count. Frames per change vary legitimately: two
+    // changes can share one poll, a poll landing between the totals write and the meta write
+    // sends a second, totals-only update, and a minute rolling over adds one (F17).
+    const reached = (frames: { msg: LiveMessage }[]) =>
+      frames.some(
+        ({ msg }) =>
+          msg.type === 'update' && msg.changed.some((t) => t.contestantId === A && t.total === 6),
+      );
+    await until(() => reached(one.frames) && reached(two.frames));
+    await sleep(POLL_MS * 2); // anything still in flight lands on both
 
     const strip = ({ msg }: { msg: LiveMessage }) => msg;
     expect(one.frames.slice(1).map(strip)).toEqual(two.frames.slice(1).map(strip));

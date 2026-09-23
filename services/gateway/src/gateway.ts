@@ -7,6 +7,7 @@ import {
   type LiveHeartbeat,
   type LiveSnapshot,
   type LiveUpdate,
+  MINUTES_WINDOW,
   redisKeys,
 } from '@tally/contracts';
 import type { Redis } from 'ioredis';
@@ -14,7 +15,7 @@ import type { Logger } from 'pino';
 import { type WebSocket, WebSocketServer } from 'ws';
 import { z } from 'zod';
 import { debugPage } from './debug-page.js';
-import { diffTotals } from './diff.js';
+import { diffMinutes, diffTotals } from './diff.js';
 
 interface GatewayOptions {
   redis: Redis;
@@ -36,6 +37,9 @@ interface Room {
   last: Map<string, number>;
   totalVotes: number;
   status: ContestStatus | null;
+  /** Per-minute counts in the current window, and the window's last minute (F17). */
+  minutes: Map<number, number>;
+  minutesTo: number;
   ready: Promise<void>;
   timer?: NodeJS.Timeout;
   closed: boolean;
@@ -54,17 +58,36 @@ export function createGateway({
   const alive = new WeakMap<WebSocket, boolean>();
 
   async function read(contestId: string) {
-    const [totals, [totalVotes, status]] = await Promise.all([
+    const [totals, [totalVotes, status, lastMinute]] = await Promise.all([
       redis.hgetall(redisKeys.totals(contestId)),
-      redis.hmget(redisKeys.meta(contestId), 'totalVotes', 'status'),
+      redis.hmget(redisKeys.meta(contestId), 'totalVotes', 'status', 'lastMinute'),
     ]);
     const map = new Map(Object.entries(totals).map(([id, v]) => [id, Number(v)]));
     const sum = [...map.values()].reduce((s, v) => s + v, 0);
     const known = ContestStatus.safeParse(status);
+
+    // The chart window: the last MINUTES_WINDOW minutes, ending now, or for a closed contest at
+    // its last minute with votes, so its chart doesn't scroll away. Only those fields are read.
+    const nowMinute = Math.floor(Date.now() / 60_000) * 60_000;
+    const minutesTo =
+      known.data === 'closed' && lastMinute != null ? Number(lastMinute) : nowMinute;
+    const window = Array.from(
+      { length: MINUTES_WINDOW },
+      (_, i) => minutesTo - (MINUTES_WINDOW - 1 - i) * 60_000,
+    );
+    const counts = await redis.hmget(redisKeys.minutes(contestId), ...window.map(String));
+    const minutes = new Map<number, number>();
+    window.forEach((minute, i) => {
+      const count = counts[i];
+      if (count != null) minutes.set(minute, Number(count));
+    });
+
     return {
       totals: map,
       totalVotes: totalVotes == null ? sum : Number(totalVotes),
       status: known.success ? known.data : null,
+      minutes,
+      minutesTo,
     };
   }
 
@@ -82,18 +105,24 @@ export function createGateway({
         const changed = diffTotals(room.last, next.totals);
         const totalsMoved = next.totalVotes !== room.totalVotes;
         const statusMoved = next.status !== room.status;
+        const minutesChanged = diffMinutes(room.minutes, next.minutes);
+        const windowMoved = next.minutesTo !== room.minutesTo;
         // Assign and broadcast together, with no await in between: every client's state is
         // always "snapshot + the updates computed after it".
         room.last = next.totals;
         room.totalVotes = next.totalVotes;
         room.status = next.status;
-        if (changed.length || totalsMoved || statusMoved) {
+        room.minutes = next.minutes;
+        room.minutesTo = next.minutesTo;
+        if (changed.length || totalsMoved || statusMoved || minutesChanged.length || windowMoved) {
           broadcast(room, {
             type: 'update',
             contestId: room.contestId,
             changed,
             totalVotes: next.totalVotes,
             status: next.status,
+            minutes: minutesChanged,
+            minutesTo: next.minutesTo,
             ts: Date.now(),
           });
         }
@@ -113,6 +142,8 @@ export function createGateway({
       last: new Map(),
       totalVotes: 0,
       status: null,
+      minutes: new Map(),
+      minutesTo: 0,
       ready: Promise.resolve(),
       closed: false,
     };
@@ -120,6 +151,8 @@ export function createGateway({
       room.last = first.totals;
       room.totalVotes = first.totalVotes;
       room.status = first.status;
+      room.minutes = first.minutes;
+      room.minutesTo = first.minutesTo;
       schedulePoll(room);
     });
     rooms.set(contestId, room);
@@ -156,6 +189,8 @@ export function createGateway({
       totals: [...room.last].map(([contestantId, total]) => ({ contestantId, total })),
       totalVotes: room.totalVotes,
       status: room.status,
+      minutes: [...room.minutes].map(([minute, count]) => ({ minute, count })),
+      minutesTo: room.minutesTo,
       ts: Date.now(),
     };
     ws.send(JSON.stringify(snapshot));

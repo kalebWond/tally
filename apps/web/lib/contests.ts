@@ -6,7 +6,12 @@ import type { Entrant } from './standings';
 
 export async function getContest(id: string) {
   const [contest] = await db()
-    .select({ id: schema.contests.id, name: schema.contests.name, status: schema.contests.status })
+    .select({
+      id: schema.contests.id,
+      name: schema.contests.name,
+      status: schema.contests.status,
+      opensAt: schema.contests.opensAt,
+    })
     .from(schema.contests)
     .where(eq(schema.contests.id, id))
     .limit(1);

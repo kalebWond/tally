@@ -5,6 +5,11 @@
 export const redisKeys = {
   /** Hash: contestantId → total votes. */
   totals: (contestId: string) => `tally:${contestId}:totals`,
-  /** Hash: `totalVotes`, `lastUpdated` (epoch ms), both from the consumer; `status` from web on a transition. */
+  /**
+   * Hash: `totalVotes`, `lastUpdated` (epoch ms) and `lastMinute` (latest minute with votes,
+   * epoch ms) from the consumer; `status` from web on a transition.
+   */
   meta: (contestId: string) => `tally:${contestId}:meta`,
+  /** Hash: minute start (epoch ms) → the contest's votes in that minute (F17). */
+  minutes: (contestId: string) => `tally:${contestId}:minutes`,
 };

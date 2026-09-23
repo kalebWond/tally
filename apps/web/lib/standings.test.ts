@@ -1,6 +1,6 @@
 import type { LiveSnapshot, LiveUpdate } from '@tally/contracts';
 import { describe, expect, it } from 'vitest';
-import { applyFrame, type Entrant, emptyTotals, rank, unknownIds } from './standings';
+import { applyFrame, type Entrant, emptyTotals, minuteSeries, rank, unknownIds } from './standings';
 
 const CONTEST = '0192f3a0-7c1e-7000-8000-00000000c0de';
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -25,6 +25,8 @@ const snapshot = (
   totals: totals.map(([n, total]) => ({ contestantId: id(n), total })),
   totalVotes,
   status,
+  minutes: [],
+  minutesTo: 0,
   ts: 1,
 });
 
@@ -38,6 +40,8 @@ const update = (
   changed: changed.map(([n, total]) => ({ contestantId: id(n), total })),
   totalVotes,
   status,
+  minutes: [],
+  minutesTo: 0,
   ts: 2,
 });
 
@@ -162,5 +166,64 @@ describe('applyFrame — heartbeat', () => {
   it('leaves the totals untouched (it only proves the connection is alive)', () => {
     const state = applyFrame(emptyTotals(), snapshot([[1, 5]], 5));
     expect(applyFrame(state, { type: 'heartbeat', ts: 3 })).toBe(state);
+  });
+});
+
+describe('per-minute counts (F17)', () => {
+  const M = 60_000;
+  const T = Date.UTC(2026, 8, 23, 20, 0);
+  const frame = (minutes: [number, number][], minutesTo: number, type: 'snapshot' | 'update') =>
+    ({
+      ...(type === 'snapshot' ? snapshot([]) : update([])),
+      minutes: minutes.map(([m, count]) => ({ minute: T + m * M, count })),
+      minutesTo: T + minutesTo * M,
+    }) as LiveSnapshot | LiveUpdate;
+
+  it('updates overwrite the minutes they name and keep the rest', () => {
+    const s1 = applyFrame(
+      emptyTotals(),
+      frame(
+        [
+          [0, 5],
+          [1, 2],
+        ],
+        1,
+        'snapshot',
+      ),
+    );
+    const s2 = applyFrame(s1, frame([[1, 9]], 1, 'update'));
+    expect([...s2.minutes]).toEqual([
+      [T, 5],
+      [T + M, 9],
+    ]);
+  });
+
+  it('drops minutes that slid out of the 30-minute window', () => {
+    const s1 = applyFrame(
+      emptyTotals(),
+      frame(
+        [
+          [0, 5],
+          [29, 1],
+        ],
+        29,
+        'snapshot',
+      ),
+    );
+    const s2 = applyFrame(s1, frame([[30, 3]], 30, 'update'));
+    expect(s2.minutes.has(T)).toBe(false);
+    expect(s2.minutes.get(T + 30 * M)).toBe(3);
+  });
+
+  it('series: 30 points ending at minutesTo, quiet minutes as 0', () => {
+    const series = minuteSeries(new Map([[T + 29 * M, 4]]), T + 29 * M);
+    expect(series).toHaveLength(30);
+    expect(series[0]).toEqual({ minute: T, count: 0 });
+    expect(series.at(-1)).toEqual({ minute: T + 29 * M, count: 4 });
+  });
+
+  it('series starts at the opening minute when the contest opened inside the window', () => {
+    const series = minuteSeries(new Map(), T + 29 * M, T + 25 * M + 20_000);
+    expect(series.map((p) => (p.minute - T) / M)).toEqual([25, 26, 27, 28, 29]);
   });
 });
