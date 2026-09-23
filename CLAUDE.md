@@ -119,8 +119,8 @@ A feature is done when its check in `IMPLEMENTATION_PLAN.md` passes, tests cover
 
 Update this section as you go.
 
-**Last completed:** F4, publish to Redpanda (2026-09-23)
-**Next up:** F5, consumer and totals. `votes.raw` already holds duplicates by `idempotency_key` from outage testing, which makes good dedupe fixtures.
+**Last completed:** F5, consumer and totals (2026-09-23)
+**Next up:** F6, dead-letter handling: the consumer already writes `dead_letters`; F6 adds publishing to `votes.dead`.
 
 **Seed contest:** `0192f3a0-7c1e-7000-8000-00000000c0de`, codes `C1`–`C10`.
 

@@ -96,6 +96,11 @@ export const voteBuckets = pgTable(
 /** Mirrors the votes.dead topic for the admin view. */
 export const deadLetters = pgTable('dead_letters', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
+  /**
+   * Replay guard: the vote's idempotency key, or `topic/partition/offset` for a message too
+   * malformed to have one. Unique, so reprocessing the log never duplicates a dead letter.
+   */
+  idempotencyKey: text('idempotency_key').unique(),
   payload: jsonb('payload').notNull(),
   reason: deadLetterReason('reason').notNull(),
   receivedAt: timestamptz('received_at').notNull().defaultNow(),

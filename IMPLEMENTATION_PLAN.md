@@ -55,6 +55,8 @@ Build one feature per session. Each has a goal, a build list, and a check that d
 
 **Build:** Batch consumer. Resolve code to contestant. Insert into `votes`. Increment the Redis counter. Upsert `vote_totals`. Skip anything whose idempotency key has already been seen.
 
+*Changed (F5):* Redis is set to absolute totals read back from Postgres rather than incremented, and Postgres's unique index is the only dedupe (no `tally:idem:*` keys). Unresolvable votes are already written to `dead_letters`.
+
 **Done when:** 1,000 votes produce a total of exactly 1,000, and replaying the same messages does not change it.
 
 ---
@@ -63,7 +65,7 @@ Build one feature per session. Each has a goal, a build list, and a check that d
 
 **Build:** Unresolvable codes go to `votes.dead` with a reason, and are mirrored into the `dead_letters` table.
 
-*Changed (F4):* the `votes.dead` topic already exists (created by the F4 `topics` job). F6 only needs to produce to it and write `dead_letters`.
+*Changed (F4, F5):* the `votes.dead` topic already exists (F4 `topics` job), and the consumer already writes `dead_letters` with reasons, idempotently (F5). F6 remains: publish each dead letter to `votes.dead` with `reason` and `failed_at`, and prove it end to end.
 
 **Done when:** A vote for a nonexistent code lands in the dead-letter topic with a reason and does not affect any total.
 

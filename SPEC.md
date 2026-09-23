@@ -120,7 +120,7 @@ Infrastructure: Redpanda 9092, PostgreSQL 5432, Redis 6379, ClickHouse 8123.
 |---|---|---|
 | id | bigserial PK | |
 | contest_id | uuid FK | *Changed (F2): FK added* |
-| contestant_id | uuid FK | nullable — null means unresolved. *Changed (F2): FK added* |
+| contestant_id | uuid FK | nullable — null means unresolved. *Changed (F2): FK added. Changed (F5): unresolved votes go to `dead_letters` instead, so this is never null in practice* |
 | code_submitted | text | raw code as sent |
 | voter_hash | text | ~~SHA-256 of sender identifier + salt~~ *Changed (F3):* HMAC-SHA256 of the trimmed sender, keyed by the salt. **Never store raw identifiers.** |
 | source | enum | `sms` / `web` / `generator`. *Decided (F2): Postgres enum built from the contracts Zod enum* |
@@ -146,7 +146,7 @@ Index on `(contest_id, received_at)` and unique index on `idempotency_key`.
 ### `dead_letters`
 Mirrors the `votes.dead` topic for the admin view: id, raw payload, reason, received_at.
 
-*Decided (F2):* `id bigserial`, `payload jsonb`, `reason` enum (`dead_letter_reason`), `received_at timestamptz`. Contestants with votes can't be deleted because of the FKs, so they are deactivated (`active = false`).
+*Decided (F2):* `id bigserial`, `payload jsonb`, `reason` enum (`dead_letter_reason`), `received_at timestamptz`. *Changed (F5):* plus a unique, nullable `idempotency_key` (the vote's key, or `offset:topic/partition/offset` for malformed messages) so replays never duplicate dead letters. Contestants with votes can't be deleted because of the FKs, so they are deactivated (`active = false`).
 
 ### Redis keys
 ```
@@ -154,6 +154,8 @@ tally:{contestId}:totals          hash    contestantId → count
 tally:{contestId}:meta            hash    lastUpdated, totalVotes
 tally:idem:{key}                  string  TTL 1h, redelivery guard
 ```
+
+*Changed (F5):* no `tally:idem:*` keys. Postgres's unique `idempotency_key` is the only dedupe, and the consumer **sets** `totals` and `meta.totalVotes` to absolute values read back from Postgres (upward only, via a Lua script) instead of incrementing, so redelivery after a crash heals Redis. Key builders live in contracts (`redisKeys`).
 
 ---
 

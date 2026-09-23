@@ -20,6 +20,9 @@ Where the build departs from `SPEC.md` or `IMPLEMENTATION_PLAN.md`, or pins down
 | F1 done-when (plan F1, CLAUDE.md) | `docker compose up` brings everything up | `docker compose up` = infra only; `docker compose --profile app up` = full stack. CLAUDE.md's definition of done updated | F1 |
 | Commits (plan working rules, CLAUDE.md) | commit at each feature boundary, feature number in the message | the user commits, using the project skill `/feature-commit`: `F<n>: subject` plus a what/why body. One exception in history: F3 went in as `a977aca feat(ingest): …`, written with the device-level conventional `commit-msg` skill | F3 |
 | Layout (CLAUDE.md) | no package for the database | new `packages/db` (Drizzle schema, client, migrate, seed). Migrations in `infra/migrations`. CLAUDE.md layout updated | F2 |
+| Redis sync (SPEC §5 keys, plan F5) | "increment the Redis counter"; `tally:idem:{key}` string, 1 h TTL, as a redelivery guard | Redis is **set** to absolute totals read back from Postgres (upward only, via Lua). No `tally:idem:*` keys: Postgres's unique `idempotency_key` is the only dedupe | F5 |
+| Unresolvable votes (plan F6, SPEC §5 `contestant_id` null = unresolved) | dead-lettering is F6; unresolved votes could sit in `votes` with a null contestant | F5 writes them to `dead_letters` (`unknown_code` / `malformed`); `votes.contestant_id` is never null in practice. F6 adds publishing to `votes.dead` | F5 |
+| `dead_letters` columns (SPEC §5) | id, raw payload, reason, received_at | plus a unique, nullable `idempotency_key` (the vote's key, or `offset:topic/partition/offset`) so replays don't duplicate dead letters | F5 |
 
 ### Filled in: the document was silent, and the choice is now part of a contract
 
@@ -36,6 +39,9 @@ Where the build departs from `SPEC.md` or `IMPLEMENTATION_PLAN.md`, or pins down
 | Partitions (plan F4 says "several") | 6 on both topics; Java-compatible murmur2 so placement matches rpk and other clients | F4 |
 | What a 202 means | the broker acknowledged the write (`acks=all`); a publish is capped at 5 s, then 503 | F4 |
 | Topic creation | one-shot `rpk` init job; services never create topics (`autocreateTopics: false`) | F4 |
+| `votes.received_at` | the event's `sent_at` (when ingest accepted the vote), not the processing time, so replays and minute buckets are deterministic | F5 |
+| Unknown contest | dead-lettered as `unknown_code` (the code can't resolve in that contest); no new reason value | F5 |
+| Consumer group | `tally-consumer`; new groups start at `earliest`; batches of 500 or 100 ms; offsets committed after both stores | F5 |
 
 ### Outstanding: a rule not met yet
 
@@ -181,3 +187,25 @@ Where the build departs from `SPEC.md` or `IMPLEMENTATION_PLAN.md`, or pins down
 **Decided:** retries back off at 100/200/400/800/1000 ms, with a 1 s connect timeout, and every publish is capped at 5 s, after which the request gets a 503. `/health` does a fresh metadata fetch (`forceUpdate`) and answers 503 `degraded` when the broker is unreachable.
 **Why:** found live, not in tests. With the library's defaults, stopping Redpanda held a vote request for **61.5 s** before the 503: a connection refused fails fast, but a stopped container never answers, so each retry waited out a 5 s connect timeout. The test suite now covers both "refuses" and "never answers". `/health` also kept saying 200 during the outage because metadata came from cache.
 **Consequence, observed:** a publish that times out may still land once the broker returns. In the outage test the 503'd vote *and* its client retry (same `Idempotency-Key`) both reached `votes.raw`. That's correct at-least-once behaviour, and it's exactly why F5's consumer must dedupe on `idempotency_key`.
+
+## F5 — Postgres is the only dedupe; Redis receives absolute totals
+
+**Decided:** one Postgres transaction per batch. Votes go in with `INSERT … ON CONFLICT (idempotency_key) DO NOTHING RETURNING`, only the returned rows are added to `vote_totals`, and the transaction then reads back absolute totals for *every* contestant in the batch, duplicates included. After the commit, those absolute values are written to Redis by a Lua script that only moves a count upward. No `tally:idem:*` keys.
+**Alternatives:** the spec's literal design: `SET NX tally:idem:{key}` with a 1 h TTL, then `HINCRBY`.
+**Why:** increments aren't idempotent across two stores. A crash after the Postgres commit but before `HINCRBY` leaves Redis permanently low, because on redelivery the idem key (or the unique index) says "seen" and nothing increments again. Absolute values make the Redis write safe to repeat: redelivery rewrites the right numbers. Reading totals back for duplicates is what makes a *pure* replay heal Redis. The upward-only guard stops a stale writer (a late batch, a consumer mid-rebalance) from dragging a count backwards.
+**Tested:** "crash between commit and Redis" and "stale lower total" tests, each mutation-checked: removing the duplicate read-back fails the heal test, and an unconditional `HSET` fails the stale-writer test.
+**Limit:** Redis is repaired only for contestants that appear in a later batch. Rebuilding a wiped Redis from Postgres is F18's reconciliation job.
+
+## F5 — Unresolvable votes go to `dead_letters` now; the `votes.dead` topic waits for F6
+
+**Decided:** unknown codes, unknown contests (both reason `unknown_code`) and messages that fail the `VoteEvent` schema or aren't JSON (`malformed`) are written to `dead_letters` in the same transaction and never touch a total. `dead_letters` gained a unique, nullable `idempotency_key` (migration `0001`): the vote's key, or `offset:topic/partition/offset` for a malformed message, so replays never duplicate dead letters. `votes.contestant_id` stays nullable but is never null in practice.
+**Why:** "never drop silently" applies from the first consumer, not from F6. An unknown *contest* can't be stored in `votes` at all (FK), so a single path for every unresolvable vote is simpler than splitting between `votes` (null contestant) and `dead_letters`.
+
+## F5 — Consumer mechanics
+
+**Decided:** group `tally-consumer`; batches flush at 500 messages or every 100 ms and are processed strictly in order. Offsets (`last + 1`) are committed only after Postgres and Redis. A failing batch is retried with backoff (250 ms → 10 s) and never skipped. A failed offset commit is only logged, since redelivery is absorbed by the dedupe. A new group starts at `earliest`. `votes.received_at` is the event's `sent_at` (when ingest accepted it), so replays and the F17 minute buckets are deterministic. Code lookups are cached: hits forever (codes are unique and contestants with votes can't be deleted), misses for 5 s, so a contestant added later gets votes within seconds and an invalid-code flood costs one query per code per window.
+**Observed live:** the F4 backlog (33 messages, including the retried `outage-test-1` pair) became 32 votes. Rewinding the group to offset 0 (`rpk group seek tally-consumer --to start`) re-read all 233 messages: 0 counted, 233 duplicates, totals unchanged in Postgres and Redis.
+
+## F5 — Bundling gotcha: a workspace package's dependencies belong to the service
+
+**Found live, not in tests:** the consumer image crash-looped with `Dynamic require of "events" is not supported`. tsup bundles `@tally/*` (they ship TS source), and `@tally/db` imports `pg`. The consumer listed `pg` only as a devDependency, so tsup inlined it as well, and CommonJS `pg` breaks when inlined into an ESM bundle. Fix: every runtime dependency of a bundled workspace package must also be a runtime dependency of the service. Noted in each `tsup.config.ts`. Tests run unbundled, so only the container caught it.
