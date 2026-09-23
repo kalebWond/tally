@@ -67,6 +67,16 @@ services:
       timeout: 5s
       retries: 20
 
+  # One-shot: migrate, then seed (idempotent). Consumer and web wait for it to exit 0.
+  migrate:
+    profiles: [app]
+    build: { context: ., dockerfile: packages/db/Dockerfile }
+    command: ["sh", "-c", "node dist/migrate.js && node dist/seed.js"]
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-tally}:${POSTGRES_PASSWORD:-tally}@postgres:5432/${POSTGRES_DB:-tally}
+    depends_on:
+      postgres: { condition: service_healthy }
+
   ingest:
     <<: *node-service
     build: { context: ., dockerfile: services/ingest/Dockerfile }
@@ -79,11 +89,21 @@ services:
 
   consumer:
     <<: *node-service
+    depends_on:
+      redpanda: { condition: service_healthy }
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
     build: { context: ., dockerfile: services/consumer/Dockerfile }
     ports: ["4003:4003"]
 
   web:
     <<: *node-service
+    depends_on:
+      redpanda: { condition: service_healthy }
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
     build: { context: ., dockerfile: apps/web/Dockerfile }
     ports: ["3000:3000"]
 
