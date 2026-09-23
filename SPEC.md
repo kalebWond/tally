@@ -211,6 +211,8 @@ WS /live?contestId=...
 ```
 Only changed contestants are sent after the initial snapshot.
 
+*Decided (F7):* both frames also carry `contestId`, `totalVotes` and `ts`. Totals are `[{ contestantId, total }]` with **absolute** values, and `changed` holds only contestants whose total differs from the previous frame. Close codes: `4400` invalid `contestId`, `1001` shutdown. Redis is polled once per watched contest every 250 ms. Contestant names and colours come from the web app, not the gateway. `GET /debug` serves a dev inspector page.
+
 ### Generator control (Go)
 ```
 POST /start   { ratePerSec, contestId, invalidCodeRatio }

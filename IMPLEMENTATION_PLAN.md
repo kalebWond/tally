@@ -75,6 +75,8 @@ Build one feature per session. Each has a goal, a build list, and a check that d
 
 **Build:** WebSocket server. Poll Redis on a short interval, diff against the last snapshot, broadcast only changes. Send a full snapshot on connect.
 
+*Decided (F7):* `ws`, one poll per watched contest (250 ms), absolute totals in frames, and a `/debug` inspector page for the two-tab check until F8.
+
 **Done when:** Two browser tabs show the same totals within a second of each other, and only changed contestants appear in update frames.
 
 ---

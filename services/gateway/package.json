@@ -14,10 +14,13 @@
   },
   "dependencies": {
     "@tally/contracts": "workspace:*",
+    "ioredis": "^6.0.0",
     "pino": "^10.3.1",
+    "ws": "^8.21.3",
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@types/ws": "^8.18.1",
     "tsup": "^8.5.1",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"

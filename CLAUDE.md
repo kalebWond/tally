@@ -119,8 +119,8 @@ A feature is done when its check in `IMPLEMENTATION_PLAN.md` passes, tests cover
 
 Update this section as you go.
 
-**Last completed:** F6, dead-letter handling (2026-09-23). Milestone 1 (working pipeline) is complete.
-**Next up:** F7, realtime gateway (read `tally:{contestId}:totals` via `redisKeys` from contracts).
+**Last completed:** F7, realtime gateway (2026-09-23)
+**Next up:** F8, ranked results list. Load contestant metadata from Postgres server-side, merge with `/live` frames by ID (see F7 decisions). The gateway's `/debug` page shows the raw protocol.
 
 **Seed contest:** `0192f3a0-7c1e-7000-8000-00000000c0de`, codes `C1`–`C10`.
 

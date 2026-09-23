@@ -44,6 +44,11 @@ Where the build departs from `SPEC.md` or `IMPLEMENTATION_PLAN.md`, or pins down
 | Unknown contest | dead-lettered as `unknown_code` (the code can't resolve in that contest); no new reason value | F5 |
 | Consumer group | `tally-consumer`; new groups start at `earliest`; batches of 500 or 100 ms; offsets committed after both stores | F5 |
 | `votes.dead` delivery | at-least-once: every dead letter in a batch is (re)published after the commit, so a redelivery or replay duplicates it with the same `idempotency_key` and `failed_at`; readers dedupe on the key. Keyed by the original `code` when there is one | F6 |
+| Gateway frames (SPEC §7) | snapshot `{ type, contestId, totals: [{ contestantId, total }], totalVotes, ts }`; update `{ type, contestId, changed, totalVotes, ts }`, where `changed` holds only differing contestants, as absolute totals. Zod-defined in contracts (`LiveMessage`) | F7 |
+| Gateway polling | one Redis read per watched contest every 250 ms (`GATEWAY_POLL_MS`), fanned out to all its viewers; stops when the last viewer leaves | F7 |
+| Gateway close codes | `4400` invalid `contestId`, `1001` shutdown, `1011` first read failed; ping every 30 s | F7 |
+| Contestant metadata for the UI | loaded by the web app from Postgres and merged by ID; the gateway stays Redis-only | F7 |
+| Gateway `/debug` | bare, unauthenticated inspector page for the live protocol (public data only) | F7 |
 
 ### Outstanding: a rule not met yet
 
@@ -224,3 +229,23 @@ Where the build departs from `SPEC.md` or `IMPLEMENTATION_PLAN.md`, or pins down
 **Decided:** `{ v: 1, reason, failed_at, idempotency_key, original }` (`DeadLetterEvent` in contracts). `original` is the message as received: the parsed JSON, or `{ raw }` if it wasn't JSON. Messages are keyed by the original `code` when there is one; malformed messages are keyless and spread across partitions.
 **Alternatives:** the spec's literal "original payload plus reason and failed_at", flattened into one object.
 **Why:** a malformed message has no fields to flatten, and flattening lets the original's fields collide with the added ones. One schema covers every reason. Keying by code keeps a contestant's dead letters ordered, like `votes.raw`.
+
+## F7 — Gateway protocol: absolute totals, diff-only updates, one poll per watched contest
+
+**Decided:** `WS /live?contestId=…`. On connect the client gets `{ type: "snapshot", contestId, totals: [{ contestantId, total }], totalVotes, ts }`. After that, `{ type: "update", contestId, changed, totalVotes, ts }` is sent only when something changed, and `changed` holds just the contestants whose total differs from the previous read. Values are absolute, never increments. Each contest with at least one viewer has a single Redis poll (default 250 ms, `GATEWAY_POLL_MS`) fanned out to all of its clients. The poll stops when the last viewer leaves. The protocol is Zod-defined in contracts (`LiveMessage`).
+**Alternatives:** increments in update frames (smaller, but one missed frame and the screen is wrong until reload); Redis pub/sub from the consumer (push instead of poll, but the consumer would need to know about viewers, and the spec chose polling).
+**Why:** absolute values make every frame self-correcting and give F9's counters a target to spring toward. Diffing keeps frames small; with 10 contestants and 3 moving, the live check never sent more than 2 per frame. One poll per contest means Redis load scales with contests being watched, not with viewers.
+**Ordering detail:** a joining client gets its snapshot *before* it's added to the broadcast set, synchronously after the room's first read. An update computed around the same moment can't arrive ahead of the snapshot it's relative to.
+**Measured live:** two clients got 13 identical update frames, at most 1 ms apart. From a vote's 202 at ingest to the frame arriving, the median was ~147 ms and the max 263 ms (ingest → Redpanda → consumer → Postgres/Redis → gateway), comfortably inside SPEC §8's 1 s target.
+
+## F7 — Contestant metadata comes from the web app, not the gateway
+
+**Decided:** frames carry only IDs and totals. The Next.js page (F8) loads names, codes and colours from Postgres server-side, merges by ID, and refetches if an unknown ID appears.
+**Alternatives:** the gateway includes metadata in the snapshot (one connection for the page, but a Postgres dependency and cache invalidation for the gateway).
+**Why:** it keeps the spec's read path intact (Redis → Gateway → Browser) and the gateway stateless apart from per-room caches. The web app needs Postgres for admin anyway.
+
+## F7 — Close codes, heartbeat, `/debug`
+
+**Decided:** `4400` when `contestId` is missing or not a UUID (reconnecting won't help); `1001` on shutdown (reconnect with backoff, F11); `1011` if the first Redis read fails. Validation happens *after* the upgrade so the browser receives the code. Ping every 30 s and terminate connections that don't answer. `GET /debug` serves a bare inspector page, unauthenticated since the totals are public, for watching frames in two tabs until F8 exists.
+**Testing note:** the gateway's tests use Redis logical DB 14, because the consumer's tests flush DB 15 and Vitest runs packages in parallel.
+**Limit:** if Redis is wiped, deleted keys produce no diff, so viewers keep their last values until F18 rebuilds Redis.
