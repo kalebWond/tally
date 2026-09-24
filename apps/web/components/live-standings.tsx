@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { backlogLine } from '@/lib/backlog-text';
 import { type Movement, movements } from '@/lib/movement';
-import { type Entrant, rank, unknownIds } from '@/lib/standings';
+import { type Entrant, rank, titleSize, unknownIds } from '@/lib/standings';
 import { AnimatedNumber } from './animated-number';
 import { ContestantRow, type Layout } from './contestant-row';
 import { type ConnectionState, useLiveTotals } from './use-live-totals';
@@ -125,7 +125,7 @@ export function LiveStandings({ contest, entrants, gatewayUrl, initialLayout }: 
     const url = new URL(window.location.href);
     if (next === 'list') url.searchParams.delete('view');
     else url.searchParams.set('view', next);
-    window.history.replaceState(window.history.state, '', url);
+    window.history.replaceState(null, '', url);
   };
   const { totals, totalVotes, status, minutes, minutesTo, backlog, connection, synced, retryAt } =
     useLiveTotals(gatewayUrl, contest.id);
@@ -166,7 +166,9 @@ export function LiveStandings({ contest, entrants, gatewayUrl, initialLayout }: 
             <span className="board-status" data-state={pill}>
               {STATUS_LABEL[pill]}
             </span>
-            <h1>{contest.name}</h1>
+            <h1 data-size={titleSize(contest.name)} title={contest.name}>
+              {contest.name}
+            </h1>
           </div>
           <div className="board-side">
             <fieldset className="board-layout">

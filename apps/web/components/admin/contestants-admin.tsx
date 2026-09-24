@@ -14,13 +14,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { Select, SelectContent, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import {
   Table,
@@ -30,6 +24,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { ContestOptions } from './contest-options';
 import { ContestantForm } from './contestant-form';
 import { SampleContestants } from './sample-contestants';
 
@@ -118,11 +113,7 @@ export function ContestantsAdmin(props: {
               <SelectValue placeholder="Choose a contest" />
             </SelectTrigger>
             <SelectContent>
-              {contests.map((c) => (
-                <SelectItem key={c.id} value={c.id}>
-                  {c.name} <span className="text-muted-foreground">· {c.status}</span>
-                </SelectItem>
-              ))}
+              <ContestOptions contests={contests} />
             </SelectContent>
           </Select>
           {contestId && (

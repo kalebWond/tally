@@ -125,3 +125,12 @@ export function minuteSeries(
     points.push({ minute: m, count: minutes.get(m) ?? 0 });
   return points;
 }
+
+/**
+ * How big the results page's title can be (F30): long names step down so the vote count keeps
+ * its place beside them. Counted in characters; the display face is condensed and uppercase.
+ */
+export function titleSize(name: string): 'short' | 'long' | 'xlong' {
+  const length = [...name.trim()].length;
+  return length <= 20 ? 'short' : length <= 32 ? 'long' : 'xlong';
+}

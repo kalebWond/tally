@@ -249,6 +249,8 @@ GET  /status  → { running, currentRate, sentTotal }
 
 *Decided (F29):* `GET /api/generator/backlog` answers `{ backlog }` (the same `LiveBacklog` as the live frames, from `tally:backlog`), 503 when Redis is down. The generator panel polls it next to `/status`.
 
+*Decided (F30):* operator pages show times in the viewer's zone (a `tz` cookie set by the browser; UTC when unknown), relative within a day, with UTC in the tooltip. Contest lists are newest first; `/admin/contests` filters by `?status=`.
+
 *Decided (F13):* the gate is `ADMIN_PASSWORD` plus a signed, httpOnly session cookie issued by `/login`; it protects `/control` and `/api/generator/*` now, and the admin routes below from F14.
 
 *Decided (F14):* `GET /api/contestants?contestId=`, `POST /api/contestants` (409 on a taken code), `PATCH /api/contestants/:id`. The code can't change after creation; `{ active: false }` deactivates (no delete). Schemas `ContestantCreate` / `ContestantUpdate` in contracts.

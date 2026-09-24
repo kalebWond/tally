@@ -8,6 +8,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { ContestOptions } from './contest-options';
 
 type Contest = { id: string; name: string; status: string };
 
@@ -27,11 +28,7 @@ export function ContestPicker(props: {
       </SelectTrigger>
       <SelectContent>
         {allValue && <SelectItem value={allValue}>All contests</SelectItem>}
-        {contests.map((c) => (
-          <SelectItem key={c.id} value={c.id}>
-            {c.name} <span className="text-muted-foreground">· {c.status}</span>
-          </SelectItem>
-        ))}
+        <ContestOptions contests={contests} />
       </SelectContent>
     </Select>
   );

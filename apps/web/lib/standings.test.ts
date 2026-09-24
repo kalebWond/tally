@@ -1,6 +1,14 @@
 import type { LiveSnapshot, LiveUpdate } from '@tally/contracts';
 import { describe, expect, it } from 'vitest';
-import { applyFrame, type Entrant, emptyTotals, minuteSeries, rank, unknownIds } from './standings';
+import {
+  applyFrame,
+  type Entrant,
+  emptyTotals,
+  minuteSeries,
+  rank,
+  titleSize,
+  unknownIds,
+} from './standings';
 
 const CONTEST = '0192f3a0-7c1e-7000-8000-00000000c0de';
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -227,5 +235,14 @@ describe('per-minute counts (F17)', () => {
   it('series starts at the opening minute when the contest opened inside the window', () => {
     const series = minuteSeries(new Map(), T + 29 * M, T + 25 * M + 20_000);
     expect(series.map((p) => (p.minute - T) / M)).toEqual([25, 26, 27, 28, 29]);
+  });
+});
+
+describe('titleSize (F30)', () => {
+  it('steps down for long names', () => {
+    expect(titleSize('Tally Showcase')).toBe('short');
+    expect(titleSize('x'.repeat(20))).toBe('short');
+    expect(titleSize('Ethiopian Got Talent Final')).toBe('long');
+    expect(titleSize('Ethiopian-got-talents-final-competition')).toBe('xlong');
   });
 });

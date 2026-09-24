@@ -96,11 +96,11 @@ body {
 }
 
 /* Header ---------------------------------------------------------------- */
+/* Two columns (F30): the name takes what's left, the count keeps its place on the right. */
 .board-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
   gap: 16px 32px;
   padding-bottom: 20px;
   border-bottom: 1px solid var(--line);
@@ -108,6 +108,7 @@ body {
 .board-title {
   display: grid;
   gap: 10px;
+  min-width: 0;
 }
 .board-title h1 {
   margin: 0;
@@ -118,6 +119,19 @@ body {
   letter-spacing: 0.01em;
   text-transform: uppercase;
   text-wrap: balance;
+  /* Breaks at spaces and hyphens first; a single long word breaks anywhere rather than overflow. */
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+.board-title h1[data-size="long"] {
+  font-size: clamp(28px, 4.6vw, 44px);
+}
+.board-title h1[data-size="xlong"] {
+  font-size: clamp(24px, 3.6vw, 36px);
 }
 .board-status {
   justify-self: start;
@@ -522,5 +536,19 @@ body {
   }
   .row[data-rising] {
     animation: none;
+  }
+}
+
+/* Phones (F30): the name gets the full width; the layout toggle and the count share a row below. */
+@media (max-width: 640px) {
+  .board-head {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .board-side {
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: end;
+  }
+  .board-side .board-count {
+    justify-self: end;
   }
 }

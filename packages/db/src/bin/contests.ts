@@ -4,7 +4,20 @@ import { loadEnv } from '../env.ts';
 
 // `pnpm contests` (F28): every contest, newest first, with the ID `pnpm recap <id>` takes.
 
-const when = (d: Date | null) => (d ? `${d.toISOString().slice(0, 16).replace('T', ' ')}` : '—');
+// This machine's time zone (F30), named in the column headers.
+const local = new Intl.DateTimeFormat('en-GB', {
+  day: 'numeric',
+  month: 'short',
+  year: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+});
+const zone =
+  new Intl.DateTimeFormat('en-GB', { timeZoneName: 'short' })
+    .formatToParts(new Date())
+    .find((p) => p.type === 'timeZoneName')?.value ?? 'local';
+const when = (d: Date | null) => (d ? local.format(d) : '—');
 const n = new Intl.NumberFormat('en');
 
 const { db, close } = createDb(loadEnv().DATABASE_URL);
@@ -20,7 +33,15 @@ try {
     when(c.opensAt),
     when(c.closesAt),
   ]);
-  const header = ['ID', 'NAME', 'STATUS', 'CONTESTANTS', 'VOTES', 'OPENED (UTC)', 'CLOSED (UTC)'];
+  const header = [
+    'ID',
+    'NAME',
+    'STATUS',
+    'CONTESTANTS',
+    'VOTES',
+    `OPENED (${zone})`,
+    `CLOSED (${zone})`,
+  ];
   const right = new Set([3, 4]);
   const widths = header.map((h, i) => Math.max(h.length, ...rows.map((r) => (r[i] ?? '').length)));
   const line = (cells: string[]) =>

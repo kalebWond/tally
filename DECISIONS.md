@@ -52,6 +52,8 @@ Where the build departs from `SPEC.md` or `IMPLEMENTATION_PLAN.md`, or pins down
 | Area | Decision | Feature |
 |---|---|---|
 | Adding several contestants (F27) | `POST /api/contestants/batch`: one insert, all or none; issues point at rows as `contestants.<i>.<field>`; 400 for a code repeated in the batch, 409 for one the contest has | F27 |
+| Operator times (F30) | the viewer's zone from a `tz` cookie (UTC if missing or unknown); "x min ago" within a day, else `24 Sept 2026, 17:34` (en-GB); full local time · UTC in the tooltip; dead letters show local clock time with ms | F30 |
+| Contest order (F30) | every list and picker: `created_at desc`; pickers grouped Open / Draft / Closed; `/admin/contests?status=open\|draft\|closed` filters | F30 |
 | Consumer port (SPEC §4 says —) | `4003`, serving `/health` only (later `/metrics`) | F1 |
 | Every service's `/health` | Shared `HealthResponse` in contracts. Web serves it at `/health`, not `/api/health` | F1 |
 | Enum value sets (SPEC §5 says `text`) | `contest_status`, `vote_source`, `dead_letter_reason` are Postgres enums built from Zod enums in contracts | F2 |
@@ -809,3 +811,19 @@ Headless Chrome with two tabs (the panel, signed in, and the Tally Showcase resu
 - **Long names:** a two-column header. The name shrinks in steps by length, wraps at most 2 lines and shows in full on hover; the count never leaves the right. Rejected: always putting the name on its own row (costs height for every contest), or only right-aligning the wrapped count (the name would still dwarf everything).
 - **Times:** the viewer's local zone, "x min ago" within a day, UTC in the tooltip. The zone travels in a cookie so server-rendered pages already show local time. Otherwise the server (UTC) and the browser (local) would render different text, which is why dead letters used UTC in the first place. Rejected: a time-zone setting (more UI than a single operator needs), and local time without relative times (the user preferred "12 min ago" for recent events).
 - **Order:** newest first everywhere, with status filter chips on `/admin/contests` and status headings in pickers. A row's position no longer depends on its status. Rejected: pinning live contests in a separate section (rows would still move, just on the next load), and sortable columns (more than the problem needs).
+
+## F30 — UI polish: what building it turned up
+**Built as planned:** the two-column results header with three title sizes; local times through a `tz` cookie, a `TimeProvider` in new `app/admin` and `app/control` layouts, and `<Time>` / `<ClockTime>`; newest-first contests with filter chips and grouped pickers (`ContestOptions`, one component for all three pickers). `pnpm contests` shows the machine's zone.
+- **A server component can't import a value from a `'use client'` module.** The cookie name lived next to the client component that writes it, and the server layout imported it from there. On the server that import is a client reference, not the string `"tz"`, so `cookies().get()` found nothing and every time stayed in UTC, with no error. The constant now lives in `lib/time.ts`, which both sides import.
+- **`history.replaceState` must be given `null`, not `window.history.state`.** Passing Next's own state object back stopped its router from learning the new URL, so the next `router.refresh()` (after closing a contest) put the old URL back and the `?status=` filter was lost. The F24 List/Grid toggle had the same latent bug: a refresh on the results page, such as when a contestant is added, would have dropped `?view=grid`. Both now pass `null`, as the Next docs show.
+- **The cookie is written unencoded** (IANA names are cookie-safe) and decoded defensively on the server; an unknown zone falls back to UTC, and the client doesn't keep refreshing when the server disagrees.
+- **Relative times without a hydration mismatch:** the server renders with its own clock, the browser's first render reuses that exact `now`, then switches to its own clock and ticks every 30 s.
+- **A filtered list keeps what it matched:** closing a contest while viewing "Open" leaves its row until the filter changes (checked: the row stays; after a reload it's gone).
+
+## F30 — How the done-when was verified
+Headless Chrome with its time zone set to `Africa/Addis_Ababa`, signed in, starting with no `tz` cookie. 25 of 25 checks passed:
+- **Long names:** a draft named "Ethiopian-got-talents-final-competition" (39 characters, from the user's screenshot): at 1,400 px one line at 36 px, the count on the same row and flush right; at 390 px two lines at 24 px, the count under the name, no sideways scroll. "Tally Showcase" at 56 px and 34 px, same behaviour, full name in the tooltip. The draft was deleted afterwards.
+- **Times:** the first page wrote `tz=Africa/Addis_Ababa`. The user's contest read "46 min ago" and "35 min ago", with the tooltip "Thu, 24 Sept 2026, 18:05:59 GMT+3 · 2026-09-24 15:05:59 UTC"; no hydration warning or error in the console; a minute later it read "36 min ago" without a reload.
+- **Order:** newest first matched the database; closing and reopening Tally Showcase left every row where it was; chip counts matched; "Open" filtered and set `?status=open`; closing a contest under "Open" kept its row; after a reload the filter held and the closed contest was gone.
+- **Also:** the List/Grid toggle still switches without a navigation and holds after a reload; the generator's picker lists Open, Draft, Closed groups.
+- Tests: `time.test.ts` (relative boundaries, zones including Asia/Kolkata's half hour, clock time with ms, bad zones → UTC) and `titleSize`.

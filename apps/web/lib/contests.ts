@@ -36,13 +36,16 @@ export async function getEntrants(contestId: string): Promise<Entrant[]> {
     .orderBy(asc(c.code));
 }
 
-/** Every contest, open ones first, for pickers. */
+/**
+ * Every contest, newest first (F30). Only by creation: a contest's place in a list never changes
+ * when it opens or closes. Pickers group them by status (`ContestOptions`).
+ */
 export async function getContests() {
   const c = schema.contests;
   return db()
     .select({ id: c.id, name: c.name, status: c.status, opensAt: c.opensAt, closesAt: c.closesAt })
     .from(c)
-    .orderBy(sql`${c.status} = 'open' desc`, desc(c.createdAt));
+    .orderBy(desc(c.createdAt), c.id);
 }
 
 /** The contest `/` should show: the most recently opened open contest, else the newest one. */

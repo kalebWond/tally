@@ -3,18 +3,13 @@
 import type { GeneratorStatus, LiveBacklog } from '@tally/contracts';
 import { ExternalLink } from 'lucide-react';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { ContestOptions } from '@/components/admin/contest-options';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { Select, SelectContent, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Slider } from '@/components/ui/slider';
 import { timeLeft } from '@/lib/backlog-text';
 import { RateChart } from './rate-chart';
@@ -112,11 +107,7 @@ export function ControlPanel({
                     <SelectValue placeholder="Choose a contest" />
                   </SelectTrigger>
                   <SelectContent>
-                    {contests.map((c) => (
-                      <SelectItem key={c.id} value={c.id}>
-                        {c.name} <span className="text-muted-foreground">· {c.status}</span>
-                      </SelectItem>
-                    ))}
+                    <ContestOptions contests={contests} />
                   </SelectContent>
                 </Select>
               </Field>

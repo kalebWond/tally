@@ -4,6 +4,7 @@ import { type Contest, ErrorResponse } from '@tally/contracts';
 import { Clapperboard, ExternalLink, Plus, Trash2, Users } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { type FormEvent, useState } from 'react';
+import { Time, useTimeZone } from '@/components/time';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -24,6 +25,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { fullTime } from '@/lib/time';
 
 type Action = { contest: Contest; to: 'open' | 'closed' };
 
@@ -46,17 +48,45 @@ const STATUS_TONE: Record<Contest['status'], string> = {
   draft: 'bg-muted text-muted-foreground',
 };
 
-const when = (iso: string | null) => (iso ? `${iso.slice(0, 10)} ${iso.slice(11, 19)} UTC` : '—');
+const FILTERS = ['all', 'open', 'draft', 'closed'] as const;
+type Filter = (typeof FILTERS)[number];
+const FILTER_LABEL: Record<Filter, string> = {
+  all: 'All',
+  open: 'Open',
+  draft: 'Draft',
+  closed: 'Closed',
+};
 
 export function ContestsAdmin({
   contests,
   contestantCounts,
+  initialFilter,
 }: {
+  /** Newest first (F30): a row's place never depends on its status. */
   contests: Contest[];
   /** Active contestants per contest id. */
   contestantCounts: Record<string, number>;
+  initialFilter: Filter;
 }) {
   const router = useRouter();
+  const timeZone = useTimeZone();
+  const [filter, setFilter] = useState<Filter>(initialFilter);
+  // The rows the filter matched when it was chosen stay listed even if their status changes, so
+  // closing a contest while viewing "Open" doesn't make it vanish under the pointer.
+  const [kept, setKept] = useState(
+    () => new Set(contests.filter((c) => c.status === initialFilter).map((c) => c.id)),
+  );
+  const shown = contests.filter((c) => filter === 'all' || c.status === filter || kept.has(c.id));
+  const count = (f: Filter) =>
+    f === 'all' ? contests.length : contests.filter((c) => c.status === f).length;
+  function chooseFilter(next: Filter) {
+    setFilter(next);
+    setKept(new Set(contests.filter((c) => c.status === next).map((c) => c.id)));
+    const url = new URL(window.location.href);
+    if (next === 'all') url.searchParams.delete('status');
+    else url.searchParams.set('status', next);
+    window.history.replaceState(null, '', url);
+  }
   const [confirm, setConfirm] = useState<Action | null>(null);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
@@ -82,8 +112,8 @@ export function ContestsAdmin({
         };
         const stamp =
           to === 'closed'
-            ? `Cut-off: ${when(updated.closesAt)}.`
-            : `Open since ${when(updated.opensAt)}.`;
+            ? `Cut-off: ${updated.closesAt ? fullTime(updated.closesAt, timeZone) : '—'}.`
+            : `Open since ${updated.opensAt ? fullTime(updated.opensAt, timeZone) : '—'}.`;
         setNotice({
           tone: liveUpdated ? 'ok' : 'error',
           text: `${contest.name} is ${updated.status}. ${stamp}${
@@ -192,6 +222,23 @@ export function ContestsAdmin({
         </p>
       )}
 
+      <fieldset className="flex flex-wrap gap-2" data-testid="status-filter">
+        <legend className="sr-only">Show</legend>
+        {FILTERS.map((f) => (
+          <Button
+            key={f}
+            size="sm"
+            variant={filter === f ? 'secondary' : 'ghost'}
+            aria-pressed={filter === f}
+            data-filter={f}
+            onClick={() => chooseFilter(f)}
+          >
+            {FILTER_LABEL[f]}
+            <span className="tabular-nums text-muted-foreground">{count(f)}</span>
+          </Button>
+        ))}
+      </fieldset>
+
       <div className="overflow-x-auto rounded-xl border bg-card">
         <Table>
           <TableHeader>
@@ -205,7 +252,14 @@ export function ContestsAdmin({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {contests.map((c) => {
+            {shown.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">
+                  No {filter === 'all' ? '' : `${filter} `}contests.
+                </TableCell>
+              </TableRow>
+            )}
+            {shown.map((c) => {
               const action = ACTION[c.status];
               return (
                 <TableRow key={c.id} data-contest={c.id} data-status={c.status}>
@@ -220,10 +274,16 @@ export function ContestsAdmin({
                     {contestantCounts[c.id] ?? 0}
                   </TableCell>
                   <TableCell className="tabular-nums text-muted-foreground">
-                    {c.opensAt ? when(c.opensAt) : c.status === 'draft' ? '—' : 'since creation'}
+                    {c.opensAt ? (
+                      <Time iso={c.opensAt} />
+                    ) : c.status === 'draft' ? (
+                      '—'
+                    ) : (
+                      'since creation'
+                    )}
                   </TableCell>
                   <TableCell className="tabular-nums text-muted-foreground">
-                    {when(c.closesAt)}
+                    {c.closesAt ? <Time iso={c.closesAt} /> : '—'}
                   </TableCell>
                   <TableCell>
                     <div className="flex justify-end gap-2">

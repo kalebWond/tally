@@ -6,11 +6,11 @@ import { ArrowLeft, RefreshCw } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
+import { Time } from '@/components/time';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 
 const n = new Intl.NumberFormat('en');
-const time = (iso: string) => `${iso.slice(0, 10)} ${iso.slice(11, 19)} UTC`;
 
 /** Plays the recap with Remotion's player: drawn live in the browser, nothing rendered or stored. */
 export function RecapPlayer({ data, loadedAt }: { data: RecapData; loadedAt: string }) {
@@ -33,9 +33,15 @@ export function RecapPlayer({ data, loadedAt }: { data: RecapData; loadedAt: str
             </Badge>
             <span data-testid="recap-votes">
               {n.format(totalVotes)} votes · {contestants.length} contestants ·{' '}
-              {closed && contest.closesAt
-                ? `closed ${time(contest.closesAt)}`
-                : `results as of ${time(loadedAt)}`}
+              {closed && contest.closesAt ? (
+                <>
+                  closed <Time iso={contest.closesAt} />
+                </>
+              ) : (
+                <>
+                  results as of <Time iso={loadedAt} />
+                </>
+              )}
             </span>
           </p>
         </div>

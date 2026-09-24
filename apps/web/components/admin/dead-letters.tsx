@@ -4,6 +4,7 @@ import type { DeadLetterCounts, DeadLetterReason, DeadLetterRow } from '@tally/c
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import Link from 'next/link';
 import { Fragment, useEffect, useState } from 'react';
+import { ClockTime } from '@/components/time';
 import { Badge } from '@/components/ui/badge';
 import {
   Table,
@@ -30,9 +31,6 @@ function summary(payload: unknown) {
   return { code: str('code'), source: str('source'), raw: str('raw') };
 }
 
-/** UTC, so the server's render and the browser's hydration agree whatever the viewer's zone. */
-const time = (iso: string) => iso.slice(11, 23);
-
 /** Dead letters, one per row; click a row to see the payload exactly as it was received. */
 export function DeadLetterTable(props: {
   items: DeadLetterRow[];
@@ -55,7 +53,7 @@ export function DeadLetterTable(props: {
           <TableRow>
             <TableHead className="w-8" />
             <TableHead>#</TableHead>
-            <TableHead>Received (UTC)</TableHead>
+            <TableHead>Received</TableHead>
             <TableHead>Reason</TableHead>
             <TableHead>Code</TableHead>
             <TableHead>Contest</TableHead>
@@ -93,7 +91,9 @@ export function DeadLetterTable(props: {
                     )}
                   </TableCell>
                   <TableCell className="tabular-nums text-muted-foreground">{d.id}</TableCell>
-                  <TableCell className="tabular-nums">{time(d.receivedAt)}</TableCell>
+                  <TableCell className="tabular-nums">
+                    <ClockTime iso={d.receivedAt} />
+                  </TableCell>
                   <TableCell>
                     <Badge variant="outline" className={REASON_TONE[d.reason]}>
                       {reasonLabels[d.reason]}
