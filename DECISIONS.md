@@ -21,6 +21,7 @@ Where the build departs from `SPEC.md` or `IMPLEMENTATION_PLAN.md`, or pins down
 | Counting backlog on the panel (plan F29) | the generator status handler adds `backlog` | a separate `GET /api/generator/backlog`, polled with `/status`: `GeneratorStatus` is a contract the Go generator mirrors, so it stays the generator's own | F29 |
 | Feature list (plan), third time | F30 deployment, F31 README, optional F32–F34 Kubernetes | new F30 UI polish; deployment is now F31, README F32, Kubernetes F33–F35. Earlier entries that mention deployment were updated to F31 | after F29 |
 | Feature list (plan), fourth time | F31 deployment, F32 README, optional F33–F35 Kubernetes | new F31 lively UI; deployment is now F32, README F33, Kubernetes F34–F36. Earlier entries that mention deployment were updated to F32 | after F30 |
+| Feature list (plan), fifth time | F32 deployment, F33 README, optional F34–F36 Kubernetes | new F32 stage look; deployment is now F33, README F34, Kubernetes F35–F37. Earlier entries that mention deployment were updated to F33 | after F31 |
 | Leader highlight (plan F31) | slides between rows as one shared element | handed over by fading: in on the new leader as it glides up, out on the old one as it drops. A shared element's hold on first place ended early when its row was also animating (a 15 px jump) | F31 |
 | Bars (plan F31) | "each bar's width springs to its new share" | none: built as votes relative to the leader, then removed after F31 at the user's request (on the cards they read as progress bars) | F31 |
 | "+N" bursts (plan F31) | at most once every ~600 ms per row | every 800 ms: at 600 ms a busy row's "+N"s overlapped | F31 |
@@ -124,7 +125,7 @@ None other. *Resolved (F13):* `apps/web`'s exit code 143 on SIGTERM was taken fo
 
 **Decided:** `docker compose up` starts only Redpanda, Postgres and Redis. Services run on the host (`pnpm dev`, `go run`) for fast iteration. `docker compose --profile app up` builds and runs every service in a container for demos, recording, and proving the Dockerfiles.
 **Alternatives:** everything in Compose always (slow edit loop through image rebuilds or bind mounts); infra only (Dockerfiles rot until deployment).
-**Why:** you get the fast loop day to day, and the containerised path stays exercised. Each service gets its Dockerfile when the service is created, not retrofitted at deployment (F32).
+**Why:** you get the fast loop day to day, and the containerised path stays exercised. Each service gets its Dockerfile when the service is created, not retrofitted at deployment (F33).
 
 ## F1 — Redpanda advertises two listeners
 
@@ -199,7 +200,7 @@ None other. *Resolved (F13):* `apps/web`'s exit code 143 on SIGTERM was taken fo
 
 **Decided:** the `app` profile has a `migrate` service (`node dist/migrate.js && node dist/seed.js`). Consumer and web wait for `service_completed_successfully`. On the host: `pnpm db:migrate` and `pnpm db:seed`.
 **Alternatives:** each service migrates on boot (races between replicas); migrate by hand.
-**Why:** one owner for schema changes, and it's the same shape as a Kubernetes Job or init step later. Seeding runs in the local stack only because it's idempotent and the demo needs data. A production deployment (F32) runs migrate alone.
+**Why:** one owner for schema changes, and it's the same shape as a Kubernetes Job or init step later. Seeding runs in the local stack only because it's idempotent and the demo needs data. A production deployment (F33) runs migrate alone.
 
 ## F3 — Idempotency key: honour `Idempotency-Key`, else generate
 
@@ -321,7 +322,7 @@ None other. *Resolved (F13):* `apps/web`'s exit code 143 on SIGTERM was taken fo
 ## F8 — Gateway URL is runtime config passed from the server
 
 **Decided:** the server component reads `GATEWAY_PUBLIC_URL` after `await connection()` and passes it as a prop. No `NEXT_PUBLIC_*`.
-**Why:** Next inlines `NEXT_PUBLIC_*` at build time, so changing the gateway host would mean rebuilding the image. That breaks "config from the environment" and deployment's (F32) "deploy by configuration only". The value is the gateway as the *browser* sees it, so Compose sets `ws://localhost:4001` even for the containerised web app.
+**Why:** Next inlines `NEXT_PUBLIC_*` at build time, so changing the gateway host would mean rebuilding the image. That breaks "config from the environment" and deployment's (F33) "deploy by configuration only". The value is the gateway as the *browser* sees it, so Compose sets `ws://localhost:4001` even for the containerised web app.
 
 ## F8 — Ranking rules
 
@@ -677,7 +678,7 @@ What I found along the way:
 - **Another session's processes:** 5 more headless Chrome instances belong to another project's session on this machine; I left them.
 - **Ingest's ceiling:** one Node process tops out at about 0.95 of a core, near 3,000/s.
 
-The generator reaches 3,000/s cleanly while k6, a JavaScript VM per virtual user competing for the same 8 threads, doesn't, so the likeliest cause is CPU budget on one shared laptop. That's not proven. Next steps: k6 on another machine, and more than one ingest replica (F32).
+The generator reaches 3,000/s cleanly while k6, a JavaScript VM per virtual user competing for the same 8 threads, doesn't, so the likeliest cause is CPU budget on one shared laptop. That's not proven. Next steps: k6 on another machine, and more than one ingest replica (F33).
 
 ## F23 — How "a generator burst is clearly visible as a lag spike and recovery" was verified
 Generator at 800 votes/s for 90 s, a burst to 3,000/s for 45 s (SPEC's burst target), then 90 s at 800/s. The dashboard's own queries were read back from Prometheus, and Grafana was screenshotted (`load-results/grafana-burst-3000.png`):
@@ -791,7 +792,7 @@ Headless Chrome, signed in, against "Tally Showcase" (closed, 980,508 votes). 12
 **Why:** after a long generator run is stopped, totals keep rising for a while as the queue drains, and nothing tells the operator or viewers how much is left, so they watch the numbers until they stop.
 **Decided:** the consumer measures its own lag every second (`getLag` in `@platformatic/kafka`: high watermark − committed offset per partition) and its rate, and writes them to a Redis hash `tally:backlog` that expires after 10 s. The gateway adds a `backlog` field to its frames, the generator status API adds it for `/control`, and both parse it with one `parseBacklog` in contracts. Shown on the generator panel (waiting, rate, time left) and as a counting line on results pages, per the user.
 - **Why lag is the right number:** offsets are committed only after a batch is in Postgres and Redis, so lag is exactly the votes accepted but not yet counted. It includes votes that will become dead letters, so the wording says "being counted".
-- **Several consumers:** each writes only its own partitions' fields and its own rate field, and readers sum them, so the figure stays right if the consumer is scaled out (F34–F36). The expiry makes it disappear when no consumer runs, which the panel shows as "Counting paused".
+- **Several consumers:** each writes only its own partitions' fields and its own rate field, and readers sum them, so the figure stays right if the consumer is scaled out (F35–F37). The expiry makes it disappear when no consumer runs, which the panel shows as "Counting paused".
 - **Redis rule:** the hash is derived from Redpanda and rewritten every second, so nothing exists only in Redis.
 - **Scope, system-wide, and two live contests:** `votes.raw` is partitioned by vote code, not by contest, so lag can't be split by contest without extra bookkeeping. With two contests live at once, both results pages show the same combined number. A contest that has closed can show "counting" while another contest's votes are still draining, even when all of its own votes are in. The results line says "queued votes", and its tooltip says the figure covers all live contests. The user accepted this, with the note.
 **Alternatives:** per-contest backlog (the consumer would track each contest's position in the queue; deferred until two simultaneous contests matter); reading Prometheus (optional, and can be stopped); a Kafka client in the gateway or web (the gateway is Redis-only by design, and web would carry a second Kafka client for one number).
@@ -902,3 +903,27 @@ The check ran in headless Chrome at 1,400 px against the `app` stack, with Tally
 **Decided:** removed from the rows and the cards (one element serves both, so both go). The "+N" bursts, the lift and the rank roll still carry the live feel.
 **Alternatives:** keeping them in the list only (the user asked for them gone; the list reads the same without them); a subtler bar (still a bar).
 
+
+## Plan — Stage look (F32)
+**Why:** after F31, the user found that the board reads like a video game leaderboard. They want it to look like the results segment of a TV talent show, starting with the results page. They suggested a blurred photo of a stage (like America's Got Talent) and searchlights from both bottom corners, and asked to be challenged.
+
+**Decided:**
+- **A painted stage, not a photo.**
+  - Rights: AGT's set is recognisable, copyrighted production design, and stock stage photos nearly always show performers or an audience. The project already rules out photos of real people.
+  - A photo can't react. The painted stage takes the leader's colours and dims when voting closes.
+  - A heavily blurred photo is only soft colour and bokeh. CSS gradients draw that in a few KB, sharp at any resolution, with no runtime blur.
+  - It is built first and shown to the user before anything is wired up. A licence-free photo can replace it in the same layer.
+- **Searchlights that follow the contest.**
+  - Beams that sweep all the time are a decorative loop, against F31's rule that motion comes from the data. They also tire a screen left up for hours, and across the numbers they would wash out the contrast.
+  - So the beams sit behind the panels and follow what happens: they sway with the vote rate, cross on a new leader and converge on the winner at the close.
+  - Showcase's top two are 0.3% apart, so the lead can change every few seconds. A 3 s hold before the stage changes colour, and at most one lead-change cue every 8 s, stop a close race from making the stage flicker.
+- **The stage takes the leader's colours, and the leader takes gold.** Gold is the colour of TV results. Silver and bronze would read as sport.
+- **Glass without `backdrop-filter`.** The stage behind is already soft, so a tinted panel reads as frosted. A live blur behind ten moving rows would cost the frame budget F31 won back.
+- **Barlow Condensed stays.** It is already a broadcast typeface. The flat panels and the neon are what read as a game.
+- **The operator pages stay plain.** They are tools, and the show look is for the audience. The recap video is the next candidate.
+
+**Alternatives:**
+- A licence-free stage photo. It is static and generic, and likely shows faces. It stays as the fallback.
+- Beams that always sweep (the idea as first suggested).
+- Beams in front of the board: better light, worse numbers.
+- The stage on every page.

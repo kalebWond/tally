@@ -358,9 +358,76 @@ Verified: 54 of 54 functional checks and the 60 fps check in headless Chrome, an
 
 ---
 
-## F32 — Deployment
+## F32 — Stage look for the results board
 
-*Renumbered:* was F26, then F29, then F30, then F31.
+*Added (after F31):* the user found that the board reads like a video game leaderboard. They want it to look like the results segment of a TV talent show, starting with the results page. The later features moved from F32–F36 to F33–F37.
+
+**Build:** The results page (`/results/:id`, list and grid) is put on a stage. The operator pages keep their current look: they are tools, and the show look is for what the audience sees. Barlow Condensed, the retargeting counters, the layout animations and F31's motion rules all stay.
+
+**Stage:** a painted scene fixed behind the board, not a photo. It has:
+- an LED wall glowing in the leader's two accent colours
+- out-of-focus rig lamps
+- a glossy floor and haze
+- a row of generated, out-of-focus crowd silhouettes along the bottom
+
+The softness is drawn into the gradients, so there is no runtime blur. The stage is painted once, and only `opacity` changes on it. When a lead holds for about 3 s, the stage crossfades to the new leader's colours over about 1.2 s.
+
+**Searchlights:** two beams rising from the bottom corners, behind the panels. They follow what happens in the contest, since motion comes from the data, as in F31:
+
+| Moment | Beams |
+|---|---|
+| Before the contest opens | Off |
+| Voting quiet | Nearly still |
+| Voting busy | Sway at a tempo set by the vote rate |
+| Lead change | Both swing to cross on the new leader's panel, hold about 1.5 s, then return to the sway |
+| Voting closes while the page is open | House lights dim, the beams converge on the winner and stay, and one burst of gold confetti falls |
+| Page opened on a closed contest | The finale's end state, with no animation and no confetti |
+| Tie for first | One beam on each tied contestant |
+
+A lead-change cue fires at most once every 8 s, and a new lead change mid-swing retargets the beams rather than restarting them.
+
+**Panels:**
+- Rows and cards become smoked glass: translucent, with no `backdrop-filter`, and a bright top edge.
+- The leader gets gold (rim, rank and a warm light from above) in place of the teal glow.
+- A "Winner" tag appears on the winner's panel once voting closes.
+
+**Show graphics:**
+- A red LIVE badge, or a gold "Final results" when closed.
+- The contest name as a lit sign, and the total as "votes cast".
+- The footer becomes a caption strip pinned to the bottom, TV style: "Vote now · send your contestant's code", or "Voting is closed".
+- The List/Grid toggle hides after 3 s without pointer movement. It returns on mouse move or keyboard focus.
+- The votes-per-minute chart becomes a glass panel.
+
+In list layout, all ten contestants fit a 1920×1080 screen without scrolling.
+
+**Logic:** `apps/web/lib/lighting.ts` is pure and tested. It works out:
+- the cue, from status, connection and leader history
+- the beam angles from each corner to a target
+- the sway, from the vote rate (`lib/liveliness.ts`)
+
+**Accessibility:**
+- Text always sits on a panel: totals at 7:1 contrast or better and names at 4.5:1 or better, with a beam at its brightest behind them.
+- Reduced motion: beams still, no sway or confetti, colour changes as crossfades.
+- Reduced transparency or more contrast: opaque panels and no beams.
+
+**Checkpoint:** screenshots of the static stage, at 1920×1080 and phone width, go to the user before the cues are wired. If the painted stage doesn't convince, a licence-free photo goes in the same layer.
+
+**Done when:** in headless Chrome at 1920×1080:
+- Every name and total sits above the stage and meets its contrast with a beam behind it.
+- A lead change turns both beams onto the new leader's panel within about 1 s. The stage colour follows once the lead holds, and rapid swaps don't make it flicker.
+- The beams sway faster at a higher vote rate and are nearly still when quiet.
+- Closing the contest runs the finale once. Reloading shows its end state with no confetti, and a draft keeps the beams off.
+- The toggle hides when idle and returns on mouse move and on Tab.
+- Reduced motion, reduced transparency and more contrast behave as above.
+- Ten rows fit without scrolling.
+
+The F31 60 fps check at 20,000 votes/s still passes, with no repaints of the stage while live, and the F24, F29, F30 and F31 board checks still pass.
+
+---
+
+## F33 — Deployment
+
+*Renumbered:* was F26, then F29, then F30, then F31, then F32.
 
 **Build:** Production Docker builds. Environment configuration for the chosen host. Deploy and verify.
 
@@ -368,9 +435,9 @@ Verified: 54 of 54 functional checks and the 60 fps check in headless Chrome, an
 
 ---
 
-## F33 — README and case study
+## F34 — README and case study
 
-*Renumbered:* was F27, then F30, then F31, then F32.
+*Renumbered:* was F27, then F30, then F31, then F32, then F33.
 
 **Build:** Architecture diagrams, setup instructions, published benchmark numbers, decisions and trade-offs drawn from `DECISIONS.md`, demo video embedded.
 
@@ -378,9 +445,9 @@ Verified: 54 of 54 functional checks and the 60 fps check in headless Chrome, an
 
 ---
 
-## Optional: F34–F36 — Kubernetes
+## Optional: F35–F37 — Kubernetes
 
-*Renumbered:* was F28–F30, then F31–F33, then F32–F34, then F33–F35.
+*Renumbered:* was F28–F30, then F31–F33, then F32–F34, then F33–F35, then F34–F36.
 
 **Prerequisites already satisfied:** environment-variable config, no local disk state, health endpoints, graceful SIGTERM.
 
@@ -401,6 +468,7 @@ Verified: 54 of 54 functional checks and the 60 fps check in headless Chrome, an
 | 23–27 | F23–F25 | Polished and presentable |
 | 28–32 | F26–F30 | Run a whole contest from the browser |
 | 33 | F31 | Lively UI |
-| 34–35 | F32–F33 | Deployed and written up |
+| 34 | F32 | Stage look |
+| 35–36 | F33–F34 | Deployed and written up |
 
 Stopping after session 13 already leaves you with something worth showing.

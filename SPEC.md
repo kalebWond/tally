@@ -313,6 +313,14 @@ Verified with k6 against the ingest API; results published in the README.
 
 All of it runs on shared spring presets (`apps/web/lib/motion.ts`), and reduced motion turns movement into fades.
 
+*Added (F32):* the results page looks like the results segment of a TV talent show (plan F32):
+- The board sits on a painted stage: an LED wall in the leader's colours, rig lamps, and a crowd in silhouette.
+- Two searchlights follow the contest. They sway with the vote rate, cross on a new leader and converge on the winner at the close.
+- Rows are smoked-glass panels, with gold for the leader.
+- Broadcast graphics: a LIVE badge and a caption strip along the bottom.
+
+The stage is drawn, not photographed, and shows no real people. The operator pages keep the plain look.
+
 **Card grid (later phase)**
 Portrait, name, optional flag, live count, gradient from the contestant's two accent colours. Same data and component as the list; a layout flag switches arrangement.
 
