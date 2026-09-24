@@ -8,7 +8,8 @@ const VERB = { open: 'opened', closed: 'closed' } as const;
 /**
  * `POST /api/contests/:id/status { status: "open" | "closed" }`. Closing stamps `closes_at`:
  * votes ingest accepted before it still count, later ones are dead-lettered `contest_closed`.
- * 409 for a transition that isn't allowed (draft → closed, open → open, …).
+ * 409 for a transition that isn't allowed (draft → closed, open → open, …), and for opening a
+ * contest with no active contestant (F26).
  */
 export async function POST(request: Request, ctx: RouteContext<'/api/contests/[id]/status'>) {
   const req = await readAdminJson(request, ContestStatusChange);
@@ -20,6 +21,13 @@ export async function POST(request: Request, ctx: RouteContext<'/api/contests/[i
   if (result.ok) return Response.json({ contest: result.contest, liveUpdated: result.liveUpdated });
   if (result.reason === 'not_found')
     return apiError(404, 'not_found', [{ path: 'id', message: 'No such contest.' }]);
+  if (result.reason === 'no_contestants')
+    return apiError(409, 'conflict', [
+      {
+        path: 'status',
+        message: 'The contest has no active contestants. Add at least one before opening it.',
+      },
+    ]);
   return apiError(409, 'conflict', [
     {
       path: 'status',

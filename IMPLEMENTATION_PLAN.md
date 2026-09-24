@@ -271,6 +271,8 @@ Build one feature per session. Each has a goal, a build list, and a check that d
 
 **Build:** A "New contest" form on `/admin/contests` that takes a name and creates a **draft**. Contest names are unique, ignoring case (`pnpm recap` names its file after the contest). Opening needs at least one active contestant. A draft with no votes can be deleted. After creating a contest, the admin lands on `/admin/contestants` for it. The contest pickers in `/admin/contestants` and `/control` list it straight away.
 
+*Decided (F26):* `POST /api/contests` and `DELETE /api/contests/:id`; names unique by an index on `lower(name)`; the open guard inside `setContestStatus`, under the row lock. Verified in headless Chrome: create, the case-insensitive duplicate, the open guard, two contestants, a generator run (1,205 accepted = counted), close, delete refused on it and allowed on a draft.
+
 **Done when:** A contest created from the browser can be given contestants, opened, voted on with the generator and closed, with no terminal or SQL. A second contest with the same name (in any case) is refused, opening a contest with no active contestants is refused, and only a draft with no votes can be deleted.
 
 ---

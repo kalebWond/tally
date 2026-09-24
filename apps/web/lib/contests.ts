@@ -1,6 +1,6 @@
 import 'server-only';
 import { schema } from '@tally/db';
-import { asc, desc, eq, sql } from 'drizzle-orm';
+import { asc, count, desc, eq, sql } from 'drizzle-orm';
 import { db } from './db';
 import type { Entrant } from './standings';
 
@@ -54,4 +54,15 @@ export async function getCurrentContestId() {
     .orderBy(sql`${c.status} = 'open' desc`, desc(sql`coalesce(${c.opensAt}, ${c.createdAt})`))
     .limit(1);
   return row?.id;
+}
+
+/** Active contestants per contest, for the contests admin page. */
+export async function getActiveContestantCounts(): Promise<Record<string, number>> {
+  const c = schema.contestants;
+  const rows = await db()
+    .select({ contestId: c.contestId, n: count() })
+    .from(c)
+    .where(eq(c.active, true))
+    .groupBy(c.contestId);
+  return Object.fromEntries(rows.map((r) => [r.contestId, r.n]));
 }

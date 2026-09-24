@@ -1,4 +1,5 @@
 import { CONTEST_STATUSES, DEAD_LETTER_REASONS, VOTE_SOURCES } from '@tally/contracts';
+import { sql } from 'drizzle-orm';
 import {
   bigint,
   bigserial,
@@ -12,6 +13,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
 
@@ -21,14 +23,19 @@ export const contestStatus = pgEnum('contest_status', CONTEST_STATUSES);
 export const voteSource = pgEnum('vote_source', VOTE_SOURCES);
 export const deadLetterReason = pgEnum('dead_letter_reason', DEAD_LETTER_REASONS);
 
-export const contests = pgTable('contests', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  name: text('name').notNull(),
-  status: contestStatus('status').notNull().default('draft'),
-  opensAt: timestamptz('opens_at'),
-  closesAt: timestamptz('closes_at'),
-  createdAt: timestamptz('created_at').notNull().defaultNow(),
-});
+export const contests = pgTable(
+  'contests',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    name: text('name').notNull(),
+    status: contestStatus('status').notNull().default('draft'),
+    opensAt: timestamptz('opens_at'),
+    closesAt: timestamptz('closes_at'),
+    createdAt: timestamptz('created_at').notNull().defaultNow(),
+  },
+  // Names are unique ignoring case (F26): `pnpm recap` names its file after the contest.
+  (t) => [uniqueIndex('contests_name_unique').on(sql`lower(${t.name})`)],
+);
 
 export const contestants = pgTable(
   'contestants',

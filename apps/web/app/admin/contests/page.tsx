@@ -3,14 +3,15 @@ import { connection } from 'next/server';
 import { AdminNav } from '@/components/admin/admin-nav';
 import { ContestsAdmin } from '@/components/admin/contests-admin';
 import { requireAdmin } from '@/lib/auth';
-import { getContests } from '@/lib/contests';
+import { getActiveContestantCounts, getContests } from '@/lib/contests';
 
 export const metadata: Metadata = { title: 'Contests · Tally' };
 
 export default async function ContestsPage() {
   await connection();
   await requireAdmin('/admin/contests');
-  const contests = (await getContests()).map((c) => ({
+  const [rows, contestantCounts] = await Promise.all([getContests(), getActiveContestantCounts()]);
+  const contests = rows.map((c) => ({
     ...c,
     opensAt: c.opensAt?.toISOString() ?? null,
     closesAt: c.closesAt?.toISOString() ?? null,
@@ -18,7 +19,7 @@ export default async function ContestsPage() {
   return (
     <>
       <AdminNav current="/admin/contests" />
-      <ContestsAdmin contests={contests} />
+      <ContestsAdmin contests={contests} contestantCounts={contestantCounts} />
     </>
   );
 }

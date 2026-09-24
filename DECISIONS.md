@@ -13,6 +13,7 @@ Where the build departs from `SPEC.md` or `IMPLEMENTATION_PLAN.md`, or pins down
 | Area | Spec / plan said | Now | Feature |
 |---|---|---|---|
 | Feature list (plan) | F26 deployment, F27 README, optional F28–F30 Kubernetes | new F26 create contests, F27 sample contestants, F28 recap in the browser (plus `pnpm contests`); deployment is now F29, README F30, Kubernetes F31–F33. Earlier entries that mention deployment were updated to F29 | after F25 |
+| Contest lifecycle (SPEC §7, F16) | draft → open, open → closed, closed → open; no create or delete in the admin | plus `POST /api/contests` (a draft) and `DELETE /api/contests/:id` (drafts only); opening needs an active contestant; contest names unique ignoring case (migration `0005`) | F26 |
 | Voter hash (SPEC §5) | `SHA-256` of sender + salt | `HMAC-SHA256`, salt as the key, sender trimmed first | F3 |
 | Idempotency key (SPEC §6, plan F3) | ingest generates one (a UUID) | client `Idempotency-Key` header is honoured; ingest generates a UUID only when absent. Keys are 1–128 visible ASCII, not necessarily UUIDs | F3 |
 | `votes` constraints (SPEC §5) | FK only on `contestants.contest_id` | FKs also on `votes.contest_id`, `votes.contestant_id`, `vote_totals`, `vote_buckets` (no cascades). Contestants with votes can't be deleted, only deactivated | F2 |
@@ -712,3 +713,21 @@ A real finished contest: "Tally Finals" (10 contestants, codes F1–F10), 6 minu
 - **F28, recap in the browser:** played by Remotion's player, not rendered on the server. It's instant, needs no job queue or file storage (the no-local-disk rule would need object storage for MP4s), and costs no server CPU next to the live pipeline. The composition moves into a shared package so the page and `pnpm recap` can't drift apart. `pnpm contests` lists contests with their vote counts, so the ID for `pnpm recap` is easy to find and an empty contest is obvious.
 **Alternatives:** server-side MP4 rendering from the admin page (a separate worker service using every core for about 50 s per render, plus storage for the files); keeping the old numbers and calling the new features F31–F33 (the numbers would no longer follow build order).
 **Not decided yet:** Remotion's licence is free for individuals and companies of up to 3 people; commercial use beyond that would need a company licence.
+
+## F26 — Contests are created as drafts and deleted only as drafts
+**Decided:** `/admin/contests` gets a "New contest" form (a name, nothing else) that creates a draft and takes the admin to that contest's contestants page. The list also shows each contest's active contestant count and a Contestants link, and drafts get a Delete button.
+- **Names** are trimmed, with runs of spaces collapsed, then unique ignoring case. That's enforced by a unique index on `lower(name)` (migration `0005`), not by checking first, so two admins can't both take a name; the 409 names the contest that holds it. The reason is `pnpm recap`, which names its file after the contest.
+- **Opening needs an active contestant,** checked inside `setContestStatus` under the contest's row lock. It applies to reopening as well: a contest nobody can vote for would only fill dead letters. Closing has no such check.
+- **Only drafts can be deleted,** along with their contestants. A contest that has opened can never return to draft, so a draft has never counted a vote, and deleting one loses no results. A vote check and the foreign keys from `votes` back that up. Votes sent to a draft stay in dead letters, and in ClickHouse.
+- `pgCode` moved from web into `@tally/db`, which now needs it too.
+**Alternatives:** checking names with a query before inserting (races); deleting closed contests with their votes (loses results, and the analytics copy in ClickHouse would outlive them); allowing names that differ only in case.
+
+## F26 — How the done-when was verified
+Headless Chrome against the running stack, through the pages, signed in with `ADMIN_PASSWORD`. 17 of 17 checks passed:
+- **Create:** "New contest", with `  F26 Check ` typed, created the draft "F26 Check" and landed on its contestants page. `/admin/contests` listed it with 0 contestants.
+- **Duplicate:** `f26   CHECK` was refused ("“F26 Check” already exists…"); still one contest.
+- **Open with none:** refused with a reason; still a draft.
+- **Contestants:** two added in the existing contestant form (K1, K2, generated avatars); the list showed 2.
+- **Run:** opened from the page, then the generator ran on it through `/api/generator/start` from the browser session at 200 votes/s for 6 s: 1,205 accepted, 1,205 counted. Closed from the page.
+- **Delete:** no Delete button on the closed contest, and `DELETE` on it got 409. A second draft, "F26 Throwaway", deleted from the page.
+- Tests: `contest-admin.test.ts` (create, the case-insensitive conflict, the open guard with inactive contestants, deleting drafts only and freeing the name) and `contest.test.ts` (name trimming). "F26 Check" is left closed in the dev database, like "F24 Grid Check".

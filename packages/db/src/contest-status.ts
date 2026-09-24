@@ -1,7 +1,7 @@
 import type { ContestStatus } from '@tally/contracts';
-import { eq, sql } from 'drizzle-orm';
+import { and, count, eq, sql } from 'drizzle-orm';
 import type { Db } from './client.ts';
-import { contests } from './schema.ts';
+import { contestants, contests } from './schema.ts';
 
 /** Transitions an admin may make. `closed → open` is a reopen (an accidental close isn't final). */
 const ALLOWED: Record<ContestStatus, readonly ContestStatus[]> = {
@@ -13,7 +13,8 @@ const ALLOWED: Record<ContestStatus, readonly ContestStatus[]> = {
 export type StatusChange =
   | { ok: true; contest: typeof contests.$inferSelect }
   | { ok: false; reason: 'not_found' }
-  | { ok: false; reason: 'not_allowed'; from: ContestStatus };
+  | { ok: false; reason: 'not_allowed'; from: ContestStatus }
+  | { ok: false; reason: 'no_contestants' };
 
 /**
  * Opens or closes a contest, stamping `opens_at` / `closes_at` with the database clock.
@@ -23,7 +24,8 @@ export type StatusChange =
  * is the transaction's start). So every vote a batch counted was accepted before the stamp, and
  * every batch after it sees the new window: the cut-off is exact.
  *
- * Opening (or reopening) starts a new window: `opens_at` = now, `closes_at` cleared.
+ * Opening (or reopening) starts a new window: `opens_at` = now, `closes_at` cleared. It needs at
+ * least one active contestant (F26): a contest nobody can vote for would only fill dead letters.
  */
 export async function setContestStatus(
   db: Db,
@@ -39,6 +41,13 @@ export async function setContestStatus(
     if (!current) return { ok: false, reason: 'not_found' };
     if (!ALLOWED[current.status].includes(to)) {
       return { ok: false, reason: 'not_allowed', from: current.status };
+    }
+    if (to === 'open') {
+      const [active] = await tx
+        .select({ n: count() })
+        .from(contestants)
+        .where(and(eq(contestants.contestId, contestId), eq(contestants.active, true)));
+      if (!active?.n) return { ok: false, reason: 'no_contestants' };
     }
     const [contest] = await tx
       .update(contests)

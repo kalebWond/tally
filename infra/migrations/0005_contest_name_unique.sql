@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "contests_name_unique" ON "contests" USING btree (lower("name"));

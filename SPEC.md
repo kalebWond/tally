@@ -249,10 +249,14 @@ GET  /status  → { running, currentRate, sentTotal }
 
 *Decided (F16):* `POST /api/contests/:id/status { status: "open" | "closed" }`: draft → open, open → closed, closed → open; anything else 409. Closing stamps the cut-off; votes accepted before it still count.
 
+*Decided (F26):* `POST /api/contests { name }` creates a **draft** (201; 409 when the name is taken). Names are trimmed with runs of spaces collapsed, and unique ignoring case (a unique index on `lower(name)`, migration `0005`). `DELETE /api/contests/:id` deletes a draft and its contestants (204), and anything else gets 409: results are never deleted. Opening (from draft or a reopen) needs at least one active contestant, else 409. Schema `ContestCreate` in contracts.
+
 *Decided (F15):* `GET /api/dead-letters?contestId=&reason=&before=|after=&limit=` is keyset-paginated, newest first, answering `{ items, older, newer }`; `GET /api/dead-letters/counts?contestId=&since=` gives per-reason counts. View only.
 ```
 GET/POST/PATCH /api/contestants
 GET            /api/dead-letters
+POST           /api/contests
+DELETE         /api/contests/:id
 POST           /api/contests/:id/status
 ```
 

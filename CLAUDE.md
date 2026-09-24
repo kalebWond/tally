@@ -127,11 +127,11 @@ A feature is done when its check in `IMPLEMENTATION_PLAN.md` passes, tests cover
 
 Update this section as you go.
 
-**Last completed:** F25, Remotion results recap (2026-09-24)
-**Next up:** F26, create contests, then F27 (sample contestants) and F28 (recap in the browser), added before deployment, which is now F29 (see `IMPLEMENTATION_PLAN.md`). Outstanding: the k6 spike regression (DECISIONS, F23); more than one ingest replica is the obvious next step there.
+**Last completed:** F26, create contests (2026-09-24)
+**Next up:** F27, sample contestants, then F28 (recap in the browser); deployment is F29 (see `IMPLEMENTATION_PLAN.md`). Outstanding: the k6 spike regression (DECISIONS, F23); more than one ingest replica is the obvious next step there.
 
 **Seed contest:** `0192f3a0-7c1e-7000-8000-00000000c0de`, codes `C1`–`C10`. A closed demo contest, "Tally Finals" (F1–F10), exists in the dev database for recaps.
 
-**Operator pages:** `/control` (generator panel), `/admin/contests` (open/close/reopen), `/admin/contestants`, `/admin/dead-letters` and `/admin/analytics` (ClickHouse only), behind `ADMIN_PASSWORD` from `.env`. Contestant codes are fixed once created; deactivate instead of deleting. Checks that close the seed contest must reopen it. Web now talks to Redis for one thing: the contest status in the meta hash. The consumer rebuilds Redis totals and minutes from Postgres every time it starts.
+**Operator pages:** `/control` (generator panel), `/admin/contests` (create a draft, open/close/reopen, delete drafts; opening needs an active contestant; names unique ignoring case), `/admin/contestants`, `/admin/dead-letters` and `/admin/analytics` (ClickHouse only), behind `ADMIN_PASSWORD` from `.env`. Contestant codes are fixed once created; deactivate instead of deleting. Checks that close the seed contest must reopen it. Web now talks to Redis for one thing: the contest status in the meta hash. The consumer rebuilds Redis totals and minutes from Postgres every time it starts.
 
 **Known gaps:** Go isn't installed on the dev machine; `scripts/go.sh` runs it in a container. k6 at 3,000/s misses p95 < 50 ms on the full stack (70–107 ms; F23). Check scripts that drive headless Chrome must kill its whole process group, or renderers linger.

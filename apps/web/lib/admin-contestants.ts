@@ -5,7 +5,7 @@ import type {
   ContestantUpdate,
   ErrorResponse,
 } from '@tally/contracts';
-import { schema } from '@tally/db';
+import { pgCode, schema } from '@tally/db';
 import { and, eq, sql } from 'drizzle-orm';
 import { db } from './db';
 
@@ -76,13 +76,4 @@ export async function createContestant(input: ContestantCreate): Promise<CreateR
 export async function updateContestant(id: string, patch: ContestantUpdate) {
   const [contestant] = await db().update(c).set(patch).where(eq(c.id, id)).returning(columns);
   return contestant;
-}
-
-/** Postgres error code, whether pg's error arrives bare or wrapped by Drizzle. */
-function pgCode(err: unknown): string | undefined {
-  for (let e = err; e && typeof e === 'object'; e = (e as { cause?: unknown }).cause) {
-    const code = (e as { code?: unknown }).code;
-    if (typeof code === 'string' && /^[0-9A-Z]{5}$/.test(code)) return code;
-  }
-  return undefined;
 }

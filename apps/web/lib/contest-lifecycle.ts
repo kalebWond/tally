@@ -1,6 +1,6 @@
 import 'server-only';
 import { type Contest, type ContestStatusChange, redisKeys } from '@tally/contracts';
-import { type schema, setContestStatus } from '@tally/db';
+import { createContest, deleteContest, type schema, setContestStatus } from '@tally/db';
 import { db } from './db';
 import { redis } from './redis';
 
@@ -28,3 +28,12 @@ export async function changeContestStatus(contestId: string, to: ContestStatusCh
   }
   return { ok: true as const, contest: toContest(result.contest), liveUpdated };
 }
+
+/** Creates a draft contest (F26); a name already taken, ignoring case, comes back as a conflict. */
+export async function addContest(name: string) {
+  const result = await createContest(db(), name);
+  return result.ok ? { ok: true as const, contest: toContest(result.contest) } : result;
+}
+
+/** Deletes a draft contest and its contestants (F26). Nothing else is ever deleted. */
+export const removeContest = (contestId: string) => deleteContest(db(), contestId);

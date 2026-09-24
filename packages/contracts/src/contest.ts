@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import { ContestStatus } from './enums.ts';
 
-// Contest lifecycle (SPEC §7): POST /api/contests/:id/status.
+// Contest admin (SPEC §7): POST /api/contests, DELETE /api/contests/:id,
+// POST /api/contests/:id/status.
 
 /** Open (from draft, or reopen from closed) or close. Nothing goes back to draft. */
 export const ContestStatusChange = z.object({ status: z.enum(['open', 'closed']) });
@@ -17,3 +18,16 @@ export const Contest = z.object({
   closesAt: z.iso.datetime().nullable(),
 });
 export type Contest = z.infer<typeof Contest>;
+
+/** A new contest starts as a draft. Names are unique ignoring case; runs of spaces become one. */
+export const ContestCreate = z
+  .object({
+    name: z
+      .string()
+      .trim()
+      .min(1, 'is required')
+      .max(80, 'must be 80 characters or fewer')
+      .transform((n) => n.replace(/\s+/g, ' ')),
+  })
+  .strict();
+export type ContestCreate = z.infer<typeof ContestCreate>;
