@@ -55,6 +55,7 @@ TypeScript everywhere except the load generator, which is Go.
 - Metrics: every service serves `GET /metrics` (`@tally/metrics`; the Go generator writes the text format by hand). Prometheus :9090 and Grafana :3001 (anonymous viewer) run in the `app` profile. The dashboard is generated: edit `scripts/grafana-dashboard.py`, run it, commit the JSON. Consumer lag comes from Redpanda's metrics, not the consumers.
 - `pnpm recap [contestId] [--out file.mp4]` renders a contest's recap video (Remotion, `tools/recap`) into `recaps/`; default is the most recently closed contest. `tools/recap` pins zod 4.5.4 for Remotion.
 - `pnpm load <smoke|steady|spike>` runs k6 (in a container, in the compose network) against the running `app` stack, then checks zero loss and reconciliation; the report lands in `load-results/`. It stops the Go generator first.
+- `pnpm reset:votes [--yes]` wipes every vote and everything derived from votes (Postgres, Redis, ClickHouse, the topics and both consumer groups), keeping contests and contestants. It stops and restarts the compose services that touch votes, and refuses to run while services run on the host.
 - `pnpm reconcile [--repair] [--contest <uuid>] [--json]` recounts from `votes` and checks every derived count (Postgres and Redis); in containers, `docker compose run --rm reconcile …`. It pauses each contest's counting briefly while it runs.
 - Every new service gets its own Dockerfile and a compose entry under the `app` profile when it's created.
 

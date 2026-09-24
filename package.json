@@ -24,6 +24,7 @@
     "recap": "pnpm --filter @tally/recap recap",
     "bench:clickhouse": "pnpm --filter @tally/analytics-consumer bench",
     "check:health": "scripts/check-health.sh",
+    "reset:votes": "scripts/reset-votes.sh",
     "test:go": "scripts/go.sh test -count=1 ./..."
   },
   "devDependencies": {
