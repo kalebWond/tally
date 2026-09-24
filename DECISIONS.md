@@ -45,6 +45,7 @@ Where the build departs from `SPEC.md` or `IMPLEMENTATION_PLAN.md`, or pins down
 
 | Area | Decision | Feature |
 |---|---|---|
+| Adding several contestants (F27) | `POST /api/contestants/batch`: one insert, all or none; issues point at rows as `contestants.<i>.<field>`; 400 for a code repeated in the batch, 409 for one the contest has | F27 |
 | Consumer port (SPEC §4 says —) | `4003`, serving `/health` only (later `/metrics`) | F1 |
 | Every service's `/health` | Shared `HealthResponse` in contracts. Web serves it at `/health`, not `/api/health` | F1 |
 | Enum value sets (SPEC §5 says `text`) | `contest_status`, `vote_source`, `dead_letter_reason` are Postgres enums built from Zod enums in contracts | F2 |
@@ -731,3 +732,22 @@ Headless Chrome against the running stack, through the pages, signed in with `AD
 - **Run:** opened from the page, then the generator ran on it through `/api/generator/start` from the browser session at 200 votes/s for 6 s: 1,205 accepted, 1,205 counted. Closed from the page.
 - **Delete:** no Delete button on the closed contest, and `DELETE` on it got 409. A second draft, "F26 Throwaway", deleted from the page.
 - Tests: `contest-admin.test.ts` (create, the case-insensitive conflict, the open guard with inactive contestants, deleting drafts only and freeing the name) and `contest.test.ts` (name trimming). "F26 Check" is left closed in the dev database, like "F24 Grid Check".
+
+## F27 — Sample contestants: a review list, added all together
+**Decided:** "Fill with sample contestants" (on an empty contest's contestants page, and as "Sample contestants" in the toolbar for any contest) opens a dialog with 7 invented contestants. Every field can be edited, rows removed, and the whole set reshuffled. Nothing is saved until "Add N contestants", which sends exactly the rows on screen to `POST /api/contestants/batch`.
+- **All or none:** one multi-row `INSERT`, so a failure adds nothing. Code uniqueness is left to the existing unique constraint; on a clash, the rows whose codes are taken are reported with who holds each code, and the dialog marks those rows and keeps everything else as typed.
+- **Names:** 40 invented names written by hand into `lib/sample-contestants.ts`: no real people (CLAUDE.md), no name API. A draw skips names the contest already has, ignoring case.
+- **Codes:** the first letter of the contest's name ("Spring Heats" gets S1, S2, …; C when the name has no letter), skipping codes already taken, so filling a contest that has contestants still works.
+- **Colours:** hues spaced 360/n apart from a random start, a lighter start colour and a deeper end colour 28° further round, like the seed's gradients. Spacing, not randomness, is what keeps 7 bars telling apart.
+- **Avatars:** the same generated DiceBear illustrations as the seed and the contestant form, from the final name, so an edited name gets a matching avatar.
+- **Generated in the browser:** the draw is a pure function, so Reshuffle needs no round trip and the server only ever validates what it's sent.
+**Alternatives:** filling the existing one-contestant form (doesn't fit 7); saving samples straight away with no review (the request was to review first); random colours (neighbours often look alike).
+
+## F27 — How the done-when was verified
+Headless Chrome through the pages, on a fresh contest "Spring Heats F27". 16 of 16 checks passed:
+- **One click:** its empty contestants page offered "Fill with sample contestants"; one click showed 7 rows, S1–S7, 7 different names with countries, avatars loaded, and nothing in the database yet. Reshuffle drew a different set.
+- **Exactly what was on screen:** renamed row 1, removed row 7, set row 3's code to row 2's: refused with the row marked ("S2 is already used by row 2."), nothing added. Changed it to S9 and submitted "Add 6 contestants": the 6 rows in Postgres matched the screen field for field (code, name including the edit, country, both colours, the avatar for the name).
+- **Taken code:** a second draw skipped the contest's codes and names (S3, S7, S8, S10–S13). Setting one to `s1` was refused with that row marked ("S1 is already used by Marigold Testwell in this contest."); none of the 7 added.
+- The draft was deleted afterwards (204, contestants gone).
+- Tests: `sample-contestants.test.ts` (7 valid rows, codes and names skip taken ones, hue gaps ≥ 360/7 − 3°, HSL → hex), `contestant-admin.test.ts` (all or none, which row and who holds the code), and the batch contract (a repeated code points at the second row).
+- The check script clicked before the page had hydrated at first, so the click did nothing; it now clicks until the dialog responds.

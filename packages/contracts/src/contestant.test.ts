@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ContestantCreate, ContestantUpdate } from './contestant.ts';
+import { ContestantBatchCreate, ContestantCreate, ContestantUpdate } from './contestant.ts';
 
 const CONTEST = '0192f3a0-7c1e-7000-8000-00000000c0de';
 const issuePaths = (r: { success: boolean; error?: { issues: { path: PropertyKey[] }[] } }) =>
@@ -55,5 +55,24 @@ describe('ContestantUpdate', () => {
 
   it('refuses an empty change', () => {
     expect(ContestantUpdate.safeParse({}).success).toBe(false);
+  });
+});
+
+describe('ContestantBatchCreate', () => {
+  it('refuses a code used twice in the batch, pointing at the second row', () => {
+    const r = ContestantBatchCreate.safeParse({
+      contestId: CONTEST,
+      contestants: [
+        { code: 'A1', name: 'One' },
+        { code: 'a1 ', name: 'Two' },
+      ],
+    });
+    expect(issuePaths(r)).toEqual(['contestants.1.code']);
+  });
+
+  it('refuses an empty batch', () => {
+    expect(ContestantBatchCreate.safeParse({ contestId: CONTEST, contestants: [] }).success).toBe(
+      false,
+    );
   });
 });

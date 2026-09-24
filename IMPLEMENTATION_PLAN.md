@@ -281,8 +281,10 @@ Build one feature per session. Each has a goal, a build list, and a check that d
 
 **Build:** On a contest with no contestants, `/admin/contestants` offers "Fill with sample contestants". It opens an editable review list of 7 invented contestants: name, code, accent colours, country and generated avatar. Rows can be edited, removed or reshuffled, and nothing is saved until the admin submits. All rows are added together, or none are.
 - **Names:** from a hand-written list of invented names, never real people, with no network call.
-- **Codes:** follow the contest's initial (like F1–F10 for "Tally Finals") and skip codes already taken.
+- **Codes:** start with the first letter of the contest's name ("Spring Heats" gets S1–S7) and skip codes already taken.
 - **Colours:** spread evenly around the colour wheel, so bars and cards stay easy to tell apart.
+
+*Decided (F27):* the draw runs in the browser (`lib/sample-contestants.ts`: 40 invented names, hues spaced evenly); `POST /api/contestants/batch` adds the rows in one insert. Also a "Sample contestants" button for contests that already have some. Verified in headless Chrome: 7 rows, reshuffle, an edited and a removed row saved exactly as shown, and duplicate or taken codes adding nothing with the row marked.
 
 **Done when:** One click fills 7 plausible contestants that wait for review, and submitting adds exactly what was on screen. A submission with a taken code adds none of them and points at the row.
 

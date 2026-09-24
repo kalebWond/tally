@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { VoteCode } from './vote.ts';
 
-// Admin contestant API (SPEC §7): GET/POST/PATCH /api/contestants.
+// Admin contestant API (SPEC §7): GET/POST/PATCH /api/contestants, POST /api/contestants/batch.
 
 const regions = new Intl.DisplayNames(['en'], { type: 'region' });
 
@@ -51,6 +51,33 @@ export const ContestantCreate = z.object({
   countryCode: editable.countryCode.default(null),
 });
 export type ContestantCreate = z.infer<typeof ContestantCreate>;
+
+/**
+ * `POST /api/contestants/batch` (F27): several contestants for one contest, added all together
+ * or not at all. Codes must differ within the batch; clashes with existing codes are a 409.
+ */
+export const ContestantBatchCreate = z
+  .strictObject({
+    contestId: z.uuid(),
+    contestants: z
+      .array(ContestantCreate.omit({ contestId: true }))
+      .min(1)
+      .max(20),
+  })
+  .superRefine((batch, ctx) => {
+    const seen = new Map<string, number>();
+    batch.contestants.forEach((c, i) => {
+      const first = seen.get(c.code);
+      if (first === undefined) seen.set(c.code, i);
+      else
+        ctx.addIssue({
+          code: 'custom',
+          path: ['contestants', i, 'code'],
+          message: `${c.code} is already used by row ${first + 1}.`,
+        });
+    });
+  });
+export type ContestantBatchCreate = z.infer<typeof ContestantBatchCreate>;
 
 /**
  * `PATCH /api/contestants/:id`: any subset of the editable fields, plus `active`. Strict, so a

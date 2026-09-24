@@ -1,7 +1,7 @@
 'use client';
 
 import type { Contestant } from '@tally/contracts';
-import { ExternalLink, Pencil, Plus } from 'lucide-react';
+import { ExternalLink, Pencil, Plus, Sparkles } from 'lucide-react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
@@ -31,6 +31,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { ContestantForm } from './contestant-form';
+import { SampleContestants } from './sample-contestants';
 
 type Contest = { id: string; name: string; status: string };
 type Row = Contestant & { votes: number };
@@ -48,6 +49,19 @@ export function ContestantsAdmin(props: {
   const [dialog, setDialog] = useState<Row | null | undefined>(undefined);
   const [notice, setNotice] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
   const [toggling, setToggling] = useState<string | null>(null);
+  const [samples, setSamples] = useState(false);
+  const contest = contests.find((c) => c.id === contestId);
+
+  function samplesAdded(added: Contestant[]) {
+    setSamples(false);
+    setNotice({
+      tone: 'ok',
+      text: `${added.length} sample contestant${added.length === 1 ? '' : 's'} added (${added
+        .map((c) => c.code)
+        .join(', ')}). Votes for them count from now on.`,
+    });
+    router.refresh();
+  }
 
   function saved(c: Contestant) {
     const added = dialog === null;
@@ -119,6 +133,14 @@ export function ContestantsAdmin(props: {
             </Button>
           )}
           <Button
+            variant="outline"
+            data-testid="open-samples"
+            disabled={!contestId}
+            onClick={() => setSamples(true)}
+          >
+            <Sparkles /> Sample contestants
+          </Button>
+          <Button
             data-testid="add-contestant"
             disabled={!contestId}
             onClick={() => setDialog(null)}
@@ -160,7 +182,14 @@ export function ContestantsAdmin(props: {
             {contestants.length === 0 && (
               <TableRow>
                 <TableCell colSpan={8} className="py-10 text-center text-muted-foreground">
-                  No contestants yet.
+                  <div className="grid justify-items-center gap-3">
+                    No contestants yet.
+                    {contestId && (
+                      <Button data-testid="fill-samples" onClick={() => setSamples(true)}>
+                        <Sparkles /> Fill with sample contestants
+                      </Button>
+                    )}
+                  </div>
                 </TableCell>
               </TableRow>
             )}
@@ -252,6 +281,17 @@ export function ContestantsAdmin(props: {
           )}
         </DialogContent>
       </Dialog>
+
+      {contest && (
+        <SampleContestants
+          open={samples}
+          onOpenChange={setSamples}
+          contestId={contest.id}
+          contestName={contest.name}
+          existing={contestants}
+          onAdded={samplesAdded}
+        />
+      )}
     </main>
   );
 }
