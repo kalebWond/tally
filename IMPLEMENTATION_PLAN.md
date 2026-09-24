@@ -332,9 +332,24 @@ Build one feature per session. Each has a goal, a build list, and a check that d
 
 ---
 
-## F31 — Deployment
+## F31 — Lively UI
 
-*Renumbered:* was F26, then F29, then F30.
+*Added (after F30):* the user wants the app to feel lively without copying Apple's look. The later features moved from F31–F35 to F32–F36.
+
+**Build:** A motion pass over every operator and results page, following the motion rules of the `emilkowalski/skills@apple-design` skill (installed for the project in `.claude/skills`). It uses those rules for how things move, not its visual style: the dark scoreboard, Barlow Condensed and the red LIVE accent stay. Rule: motion comes from the data or the operator's hand, never decoration; nothing loops unless something real is happening.
+- **Motion tokens:** `apps/web/lib/motion.ts` holds the spring presets (`snappy` for presses and toggles, `smooth` for layout and counters, `gentle` for entrances; critically damped, about 0.3–0.4 s), exit timings (faster than entries) and `useMotionPrefs()` (reduced motion, reduced transparency). Components use the presets, no ad-hoc numbers. Only `transform` and `opacity` animate (bar widths use `scaleX`).
+- **Results board:** counters keep retargeting (tuned to the `smooth` preset, tabular figures). A row that gains votes shows a small "+N" that floats up and fades, at most once every ~600 ms per row. Bars spring to their share. On an overtake the rising row lifts (scale 1.02, deeper shadow) while it passes, its rank rolls like an odometer, and the leader highlight slides between rows as one shared element. The LIVE dot pulses at a speed set by the real vote rate and goes still when closed; closing desaturates over about 1 s. List ↔ Grid morphs each row into its card (same elements, shared layout). The header becomes a translucent blurred bar pinned over the scrolling list; the counting-backlog line fades in, counts down and fades out.
+- **Generator panel:** buttons respond on pointer-down (scale 0.97) before the request returns; Start/Stop is one button that morphs between states; the shown rate follows the slider on a spring; sent and counted figures tick like the board's counters; the backlog tile gains a bar that drains with its ETA counting down.
+- **Admin pages:** a translucent sticky nav whose active underline slides between links; the filter chips share one sliding pill; a new contest slides in at the top, a deleted draft collapses and the rows below glide up, and a status change crossfades its badge (rows stay put, as in F30); sample contestants drop in with a 30 ms stagger; validation errors slide open under their field; saving shows progress in the button; dialogs and menus grow from their trigger, exit faster than they enter and reverse mid-flight when interrupted. The recap page's player rises in on load; the video itself only gets its spring constants aligned.
+- **Accessibility:** with reduced motion, counters jump, reorders crossfade and pulses stop; with reduced transparency the blurred bars are solid; with more contrast, borders strengthen.
+
+**Done when:** Frame captures in headless Chrome show an overtake at 1,000 votes/s (the row lifts, glides and settles; the rank rolls; the leader highlight slides), List ↔ Grid morphing, a contest created and a draft deleted without any row jumping, and a closed contest desaturating. A Chrome performance trace of the board at the generator's maximum rate stays within the 60 fps frame budget. With `prefers-reduced-motion` the glides become crossfades and nothing pulses. The F24–F30 check scripts still pass.
+
+---
+
+## F32 — Deployment
+
+*Renumbered:* was F26, then F29, then F30, then F31.
 
 **Build:** Production Docker builds. Environment configuration for the chosen host. Deploy and verify.
 
@@ -342,9 +357,9 @@ Build one feature per session. Each has a goal, a build list, and a check that d
 
 ---
 
-## F32 — README and case study
+## F33 — README and case study
 
-*Renumbered:* was F27, then F30, then F31.
+*Renumbered:* was F27, then F30, then F31, then F32.
 
 **Build:** Architecture diagrams, setup instructions, published benchmark numbers, decisions and trade-offs drawn from `DECISIONS.md`, demo video embedded.
 
@@ -352,9 +367,9 @@ Build one feature per session. Each has a goal, a build list, and a check that d
 
 ---
 
-## Optional: F33–F35 — Kubernetes
+## Optional: F34–F36 — Kubernetes
 
-*Renumbered:* was F28–F30, then F31–F33, then F32–F34.
+*Renumbered:* was F28–F30, then F31–F33, then F32–F34, then F33–F35.
 
 **Prerequisites already satisfied:** environment-variable config, no local disk state, health endpoints, graceful SIGTERM.
 
@@ -374,6 +389,7 @@ Build one feature per session. Each has a goal, a build list, and a check that d
 | 20–22 | F20–F22 | Analytics separation |
 | 23–27 | F23–F25 | Polished and presentable |
 | 28–32 | F26–F30 | Run a whole contest from the browser |
-| 33–34 | F31–F32 | Deployed and written up |
+| 33 | F31 | Lively UI |
+| 34–35 | F32–F33 | Deployed and written up |
 
 Stopping after session 13 already leaves you with something worth showing.
