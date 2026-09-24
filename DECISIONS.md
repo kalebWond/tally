@@ -19,6 +19,7 @@ Where the build departs from `SPEC.md` or `IMPLEMENTATION_PLAN.md`, or pins down
 | Gateway protocol (SPEC §7) | snapshot and update carry totals, status, minutes | both also carry `backlog` (`{ pending, perSec, etaSec }` or null), system-wide; a backlog change alone sends an update | F29 |
 | Redis keys (SPEC §5) | totals, meta, minutes | plus `tally:backlog` (per-partition lag, per-consumer rate, `updatedAt`; per-field 10 s expiry via `HEXPIRE`) | F29 |
 | Counting backlog on the panel (plan F29) | the generator status handler adds `backlog` | a separate `GET /api/generator/backlog`, polled with `/status`: `GeneratorStatus` is a contract the Go generator mirrors, so it stays the generator's own | F29 |
+| Feature list (plan), third time | F30 deployment, F31 README, optional F32–F34 Kubernetes | new F30 UI polish; deployment is now F31, README F32, Kubernetes F33–F35. Earlier entries that mention deployment were updated to F31 | after F29 |
 | Voter hash (SPEC §5) | `SHA-256` of sender + salt | `HMAC-SHA256`, salt as the key, sender trimmed first | F3 |
 | Idempotency key (SPEC §6, plan F3) | ingest generates one (a UUID) | client `Idempotency-Key` header is honoured; ingest generates a UUID only when absent. Keys are 1–128 visible ASCII, not necessarily UUIDs | F3 |
 | `votes` constraints (SPEC §5) | FK only on `contestants.contest_id` | FKs also on `votes.contest_id`, `votes.contestant_id`, `vote_totals`, `vote_buckets` (no cascades). Contestants with votes can't be deleted, only deactivated | F2 |
@@ -112,7 +113,7 @@ None other. *Resolved (F13):* `apps/web`'s exit code 143 on SIGTERM was taken fo
 
 **Decided:** `docker compose up` starts only Redpanda, Postgres and Redis. Services run on the host (`pnpm dev`, `go run`) for fast iteration. `docker compose --profile app up` builds and runs every service in a container for demos, recording, and proving the Dockerfiles.
 **Alternatives:** everything in Compose always (slow edit loop through image rebuilds or bind mounts); infra only (Dockerfiles rot until deployment).
-**Why:** you get the fast loop day to day, and the containerised path stays exercised. Each service gets its Dockerfile when the service is created, not retrofitted at deployment (F30).
+**Why:** you get the fast loop day to day, and the containerised path stays exercised. Each service gets its Dockerfile when the service is created, not retrofitted at deployment (F31).
 
 ## F1 — Redpanda advertises two listeners
 
@@ -187,7 +188,7 @@ None other. *Resolved (F13):* `apps/web`'s exit code 143 on SIGTERM was taken fo
 
 **Decided:** the `app` profile has a `migrate` service (`node dist/migrate.js && node dist/seed.js`). Consumer and web wait for `service_completed_successfully`. On the host: `pnpm db:migrate` and `pnpm db:seed`.
 **Alternatives:** each service migrates on boot (races between replicas); migrate by hand.
-**Why:** one owner for schema changes, and it's the same shape as a Kubernetes Job or init step later. Seeding runs in the local stack only because it's idempotent and the demo needs data. A production deployment (F30) runs migrate alone.
+**Why:** one owner for schema changes, and it's the same shape as a Kubernetes Job or init step later. Seeding runs in the local stack only because it's idempotent and the demo needs data. A production deployment (F31) runs migrate alone.
 
 ## F3 — Idempotency key: honour `Idempotency-Key`, else generate
 
@@ -309,7 +310,7 @@ None other. *Resolved (F13):* `apps/web`'s exit code 143 on SIGTERM was taken fo
 ## F8 — Gateway URL is runtime config passed from the server
 
 **Decided:** the server component reads `GATEWAY_PUBLIC_URL` after `await connection()` and passes it as a prop. No `NEXT_PUBLIC_*`.
-**Why:** Next inlines `NEXT_PUBLIC_*` at build time, so changing the gateway host would mean rebuilding the image. That breaks "config from the environment" and deployment's (F30) "deploy by configuration only". The value is the gateway as the *browser* sees it, so Compose sets `ws://localhost:4001` even for the containerised web app.
+**Why:** Next inlines `NEXT_PUBLIC_*` at build time, so changing the gateway host would mean rebuilding the image. That breaks "config from the environment" and deployment's (F31) "deploy by configuration only". The value is the gateway as the *browser* sees it, so Compose sets `ws://localhost:4001` even for the containerised web app.
 
 ## F8 — Ranking rules
 
@@ -665,7 +666,7 @@ What I found along the way:
 - **Another session's processes:** 5 more headless Chrome instances belong to another project's session on this machine; I left them.
 - **Ingest's ceiling:** one Node process tops out at about 0.95 of a core, near 3,000/s.
 
-The generator reaches 3,000/s cleanly while k6, a JavaScript VM per virtual user competing for the same 8 threads, doesn't, so the likeliest cause is CPU budget on one shared laptop. That's not proven. Next steps: k6 on another machine, and more than one ingest replica (F30).
+The generator reaches 3,000/s cleanly while k6, a JavaScript VM per virtual user competing for the same 8 threads, doesn't, so the likeliest cause is CPU budget on one shared laptop. That's not proven. Next steps: k6 on another machine, and more than one ingest replica (F31).
 
 ## F23 — How "a generator burst is clearly visible as a lag spike and recovery" was verified
 Generator at 800 votes/s for 90 s, a burst to 3,000/s for 45 s (SPEC's burst target), then 90 s at 800/s. The dashboard's own queries were read back from Prometheus, and Grafana was screenshotted (`load-results/grafana-burst-3000.png`):
@@ -779,7 +780,7 @@ Headless Chrome, signed in, against "Tally Showcase" (closed, 980,508 votes). 12
 **Why:** after a long generator run is stopped, totals keep rising for a while as the queue drains, and nothing tells the operator or viewers how much is left, so they watch the numbers until they stop.
 **Decided:** the consumer measures its own lag every second (`getLag` in `@platformatic/kafka`: high watermark − committed offset per partition) and its rate, and writes them to a Redis hash `tally:backlog` that expires after 10 s. The gateway adds a `backlog` field to its frames, the generator status API adds it for `/control`, and both parse it with one `parseBacklog` in contracts. Shown on the generator panel (waiting, rate, time left) and as a counting line on results pages, per the user.
 - **Why lag is the right number:** offsets are committed only after a batch is in Postgres and Redis, so lag is exactly the votes accepted but not yet counted. It includes votes that will become dead letters, so the wording says "being counted".
-- **Several consumers:** each writes only its own partitions' fields and its own rate field, and readers sum them, so the figure stays right if the consumer is scaled out (F32–F34). The expiry makes it disappear when no consumer runs, which the panel shows as "Counting paused".
+- **Several consumers:** each writes only its own partitions' fields and its own rate field, and readers sum them, so the figure stays right if the consumer is scaled out (F33–F35). The expiry makes it disappear when no consumer runs, which the panel shows as "Counting paused".
 - **Redis rule:** the hash is derived from Redpanda and rewritten every second, so nothing exists only in Redis.
 - **Scope, system-wide, and two live contests:** `votes.raw` is partitioned by vote code, not by contest, so lag can't be split by contest without extra bookkeeping. With two contests live at once, both results pages show the same combined number. A contest that has closed can show "counting" while another contest's votes are still draining, even when all of its own votes are in. The results line says "queued votes", and its tooltip says the figure covers all live contests. The user accepted this, with the note.
 **Alternatives:** per-contest backlog (the consumer would track each contest's position in the queue; deferred until two simultaneous contests matter); reading Prometheus (optional, and can be stopped); a Kafka client in the gateway or web (the gateway is Redis-only by design, and web would carry a second Kafka client for one number).
@@ -801,3 +802,10 @@ Headless Chrome with two tabs (the panel, signed in, and the Tally Showcase resu
 - **Draining:** consumer started again. The panel showed 41,068 waiting while `rpk` read 37,568 a moment later, at 8,929 votes/s: within half a second of counting. The results page showed "Counting 41,068 queued votes · about 5 s", falling 41,068 → 35,568 → 29,568 → 23,068 → 16,568 → 10,068 → 3,568, then gone after 6 s. The panel said "All counted", and Postgres held exactly 80,276 more votes.
 - **Changed from the plan's wording:** the plan said "after a 60 s run at 3,000/s". With the consumer running, 3,000/s drains within a second of stopping (lag stays under ~1,000), so there'd be almost nothing to watch. Stopping the consumer mid-run builds a real queue, and exercises "Counting paused" in the same run.
 - Tests: `backlog.test.ts` in contracts (sums, rounding, stale, unknown) and in the consumer (fields written, per-field expiry, two replicas adding up, nothing before partitions, rate window), the gateway (backlog in the snapshot; a change alone sends an update; unchanged sends nothing; gone → null), and `backlog-text.test.ts` (the wording).
+
+## Plan — UI polish (F30)
+**Why:** the user walked through a real contest and found three rough edges: a long contest name pushed the vote count onto its own line; admin times were in UTC; and closing a contest moved its row in the list.
+**Decided,** from options the user chose between:
+- **Long names:** a two-column header. The name shrinks in steps by length, wraps at most 2 lines and shows in full on hover; the count never leaves the right. Rejected: always putting the name on its own row (costs height for every contest), or only right-aligning the wrapped count (the name would still dwarf everything).
+- **Times:** the viewer's local zone, "x min ago" within a day, UTC in the tooltip. The zone travels in a cookie so server-rendered pages already show local time. Otherwise the server (UTC) and the browser (local) would render different text, which is why dead letters used UTC in the first place. Rejected: a time-zone setting (more UI than a single operator needs), and local time without relative times (the user preferred "12 min ago" for recent events).
+- **Order:** newest first everywhere, with status filter chips on `/admin/contests` and status headings in pickers. A row's position no longer depends on its status. Rejected: pinning live contests in a separate section (rows would still move, just on the next load), and sortable columns (more than the problem needs).

@@ -317,9 +317,22 @@ Build one feature per session. Each has a goal, a build list, and a check that d
 
 ---
 
-## F30 — Deployment
+## F30 — UI polish: long names, local times, stable contest order
 
-*Renumbered:* was F26, then F29.
+*Added (after F29):* from a walk-through with a real contest ("Ethiopian-got-talents-final-competition", 1.9M votes). The later features moved from F30–F34 to F31–F35.
+
+**Build:** Three fixes the user asked for, with the options they chose.
+- **Long contest names:** a long name took the whole header width and pushed the vote count onto its own line, left-aligned. The results header becomes two columns (name, then count and layout toggle), so the count stays on the right. The name steps down in size with its length (up to 20 characters, 21–32, over 32), wraps at spaces and hyphens onto at most 2 lines, and shows the full name on hover when cut. On phones (under 640 px) the count moves under the name, beside the List/Grid toggle.
+- **Local time, relative for the last day:** admin timestamps were UTC. They read in the viewer's time zone instead: "12 min ago" or "3 h ago" within a day, "24 Sep 2026, 17:34" after, and the full local time plus UTC in a tooltip. The browser's zone is kept in a `tz` cookie (written by a small client component in the operator nav, validated on the server, UTC by default), so the server renders local times directly: no UTC flash and no hydration mismatch. Relative times refresh every 30 s. Applies to the contests list, the recap page and dead letters (local clock time with milliseconds, no relative). `pnpm contests` uses the machine's zone.
+- **Stable contest order:** contests were sorted open-first, so closing one made its row jump. All contest lists order by creation, newest first. `/admin/contests` gets filter chips (All · Open · Draft · Closed, with counts) kept in `?status=`. A contest that changes status stays where it is until the filter changes. The contest pickers (generator, contestants, dead letters, analytics) use the same order, grouped under Open, Draft and Closed headings. `/` still opens the most recently opened live contest.
+
+**Done when:** At 1,400 px the user's long name fits in at most 2 lines with the count on the same row, right-aligned, and at 390 px the count sits under the name with no sideways scroll. Admin timestamps read in the browser's zone ("x min ago" within a day), with UTC on hover and no hydration warning. Closing or reopening a contest leaves its row where it was, and the filter chips count and filter correctly across a reload.
+
+---
+
+## F31 — Deployment
+
+*Renumbered:* was F26, then F29, then F30.
 
 **Build:** Production Docker builds. Environment configuration for the chosen host. Deploy and verify.
 
@@ -327,9 +340,9 @@ Build one feature per session. Each has a goal, a build list, and a check that d
 
 ---
 
-## F31 — README and case study
+## F32 — README and case study
 
-*Renumbered:* was F27, then F30.
+*Renumbered:* was F27, then F30, then F31.
 
 **Build:** Architecture diagrams, setup instructions, published benchmark numbers, decisions and trade-offs drawn from `DECISIONS.md`, demo video embedded.
 
@@ -337,9 +350,9 @@ Build one feature per session. Each has a goal, a build list, and a check that d
 
 ---
 
-## Optional: F32–F34 — Kubernetes
+## Optional: F33–F35 — Kubernetes
 
-*Renumbered:* was F28–F30, then F31–F33.
+*Renumbered:* was F28–F30, then F31–F33, then F32–F34.
 
 **Prerequisites already satisfied:** environment-variable config, no local disk state, health endpoints, graceful SIGTERM.
 
@@ -358,7 +371,7 @@ Build one feature per session. Each has a goal, a build list, and a check that d
 | 14–19 | F14–F19 | Operational depth and real numbers |
 | 20–22 | F20–F22 | Analytics separation |
 | 23–27 | F23–F25 | Polished and presentable |
-| 28–31 | F26–F29 | Run a whole contest from the browser |
-| 32–33 | F30–F31 | Deployed and written up |
+| 28–32 | F26–F30 | Run a whole contest from the browser |
+| 33–34 | F31–F32 | Deployed and written up |
 
 Stopping after session 13 already leaves you with something worth showing.

@@ -9,7 +9,7 @@ Go generator / k6 ─► ingest (Fastify) ─► Redpanda votes.raw ─► consu
 Redis ─► gateway (WebSocket, snapshot + diffs) ─► Next.js results page
 ```
 
-The full write-up (architecture, decisions and trade-offs) comes in F31. Until then, [`SPEC.md`](SPEC.md) describes the system and [`DECISIONS.md`](DECISIONS.md) records every choice along the way.
+The full write-up (architecture, decisions and trade-offs) comes in F32. Until then, [`SPEC.md`](SPEC.md) describes the system and [`DECISIONS.md`](DECISIONS.md) records every choice along the way.
 
 ## Run it
 
