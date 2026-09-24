@@ -265,7 +265,38 @@ Build one feature per session. Each has a goal, a build list, and a check that d
 
 ---
 
-## F26 — Deployment
+## F26 — Create contests
+
+*Added (after F25):* F26–F28 were added before deployment, so the deployed demo can run start to finish without a terminal: create a contest, fill it with sample contestants, open it, drive the generator, close it, play its recap. The later features moved from F26–F30 to F29–F33.
+
+**Build:** A "New contest" form on `/admin/contests` that takes a name and creates a **draft**. Contest names are unique, ignoring case (`pnpm recap` names its file after the contest). Opening needs at least one active contestant. A draft with no votes can be deleted. After creating a contest, the admin lands on `/admin/contestants` for it. The contest pickers in `/admin/contestants` and `/control` list it straight away.
+
+**Done when:** A contest created from the browser can be given contestants, opened, voted on with the generator and closed, with no terminal or SQL. A second contest with the same name (in any case) is refused, opening a contest with no active contestants is refused, and only a draft with no votes can be deleted.
+
+---
+
+## F27 — Sample contestants
+
+**Build:** On a contest with no contestants, `/admin/contestants` offers "Fill with sample contestants". It opens an editable review list of 7 invented contestants: name, code, accent colours, country and generated avatar. Rows can be edited, removed or reshuffled, and nothing is saved until the admin submits. All rows are added together, or none are.
+- **Names:** from a hand-written list of invented names, never real people, with no network call.
+- **Codes:** follow the contest's initial (like F1–F10 for "Tally Finals") and skip codes already taken.
+- **Colours:** spread evenly around the colour wheel, so bars and cards stay easy to tell apart.
+
+**Done when:** One click fills 7 plausible contestants that wait for review, and submitting adds exactly what was on screen. A submission with a taken code adds none of them and points at the row.
+
+---
+
+## F28 — Recap in the browser
+
+**Build:** The recap composition moves from `tools/recap` into a shared package, used by both the command-line render and the web app. `/admin/recap/[contestId]` plays it with Remotion's player, from an admin-only API returning the same data `pnpm recap` renders from. Each contest on `/admin/contests` gets a "Recap" link, and Remotion loads on that page only. An open contest's recap shows the results as of loading, with a Refresh button. Also `pnpm contests`: a table of every contest with ID, name, status, contestant count, votes, and when it opened and closed, so you can find the ID to pass to `pnpm recap`.
+
+**Done when:** A closed contest's recap plays in the browser from `/admin/contests`, with no terminal, from the same data and component as the MP4. `pnpm contests` lists every contest with its vote count.
+
+---
+
+## F29 — Deployment
+
+*Renumbered (after F25):* was F26.
 
 **Build:** Production Docker builds. Environment configuration for the chosen host. Deploy and verify.
 
@@ -273,7 +304,9 @@ Build one feature per session. Each has a goal, a build list, and a check that d
 
 ---
 
-## F27 — README and case study
+## F30 — README and case study
+
+*Renumbered (after F25):* was F27.
 
 **Build:** Architecture diagrams, setup instructions, published benchmark numbers, decisions and trade-offs drawn from `DECISIONS.md`, demo video embedded.
 
@@ -281,7 +314,9 @@ Build one feature per session. Each has a goal, a build list, and a check that d
 
 ---
 
-## Optional: F28–F30 — Kubernetes
+## Optional: F31–F33 — Kubernetes
+
+*Renumbered (after F25):* was F28–F30.
 
 **Prerequisites already satisfied:** environment-variable config, no local disk state, health endpoints, graceful SIGTERM.
 
@@ -299,6 +334,8 @@ Build one feature per session. Each has a goal, a build list, and a check that d
 | 7–13 | F7–F13 | The live demo works |
 | 14–19 | F14–F19 | Operational depth and real numbers |
 | 20–22 | F20–F22 | Analytics separation |
-| 23–27 | F23–F27 | Polished and presentable |
+| 23–27 | F23–F25 | Polished and presentable |
+| 28–30 | F26–F28 | Run a whole contest from the browser |
+| 31–32 | F29–F30 | Deployed and written up |
 
 Stopping after session 13 already leaves you with something worth showing.

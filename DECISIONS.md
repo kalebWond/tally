@@ -12,6 +12,7 @@ Where the build departs from `SPEC.md` or `IMPLEMENTATION_PLAN.md`, or pins down
 
 | Area | Spec / plan said | Now | Feature |
 |---|---|---|---|
+| Feature list (plan) | F26 deployment, F27 README, optional F28–F30 Kubernetes | new F26 create contests, F27 sample contestants, F28 recap in the browser (plus `pnpm contests`); deployment is now F29, README F30, Kubernetes F31–F33. Earlier entries that mention deployment were updated to F29 | after F25 |
 | Voter hash (SPEC §5) | `SHA-256` of sender + salt | `HMAC-SHA256`, salt as the key, sender trimmed first | F3 |
 | Idempotency key (SPEC §6, plan F3) | ingest generates one (a UUID) | client `Idempotency-Key` header is honoured; ingest generates a UUID only when absent. Keys are 1–128 visible ASCII, not necessarily UUIDs | F3 |
 | `votes` constraints (SPEC §5) | FK only on `contestants.contest_id` | FKs also on `votes.contest_id`, `votes.contestant_id`, `vote_totals`, `vote_buckets` (no cascades). Contestants with votes can't be deleted, only deactivated | F2 |
@@ -104,7 +105,7 @@ None other. *Resolved (F13):* `apps/web`'s exit code 143 on SIGTERM was taken fo
 
 **Decided:** `docker compose up` starts only Redpanda, Postgres and Redis. Services run on the host (`pnpm dev`, `go run`) for fast iteration. `docker compose --profile app up` builds and runs every service in a container for demos, recording, and proving the Dockerfiles.
 **Alternatives:** everything in Compose always (slow edit loop through image rebuilds or bind mounts); infra only (Dockerfiles rot until deployment).
-**Why:** you get the fast loop day to day, and the containerised path stays exercised. Each service gets its Dockerfile when the service is created, not retrofitted at F26.
+**Why:** you get the fast loop day to day, and the containerised path stays exercised. Each service gets its Dockerfile when the service is created, not retrofitted at deployment (F29).
 
 ## F1 — Redpanda advertises two listeners
 
@@ -179,7 +180,7 @@ None other. *Resolved (F13):* `apps/web`'s exit code 143 on SIGTERM was taken fo
 
 **Decided:** the `app` profile has a `migrate` service (`node dist/migrate.js && node dist/seed.js`). Consumer and web wait for `service_completed_successfully`. On the host: `pnpm db:migrate` and `pnpm db:seed`.
 **Alternatives:** each service migrates on boot (races between replicas); migrate by hand.
-**Why:** one owner for schema changes, and it's the same shape as a Kubernetes Job or init step later. Seeding runs in the local stack only because it's idempotent and the demo needs data. A production deployment (F26) runs migrate alone.
+**Why:** one owner for schema changes, and it's the same shape as a Kubernetes Job or init step later. Seeding runs in the local stack only because it's idempotent and the demo needs data. A production deployment (F29) runs migrate alone.
 
 ## F3 — Idempotency key: honour `Idempotency-Key`, else generate
 
@@ -301,7 +302,7 @@ None other. *Resolved (F13):* `apps/web`'s exit code 143 on SIGTERM was taken fo
 ## F8 — Gateway URL is runtime config passed from the server
 
 **Decided:** the server component reads `GATEWAY_PUBLIC_URL` after `await connection()` and passes it as a prop. No `NEXT_PUBLIC_*`.
-**Why:** Next inlines `NEXT_PUBLIC_*` at build time, so changing the gateway host would mean rebuilding the image. That breaks "config from the environment" and F26's "deploy by configuration only". The value is the gateway as the *browser* sees it, so Compose sets `ws://localhost:4001` even for the containerised web app.
+**Why:** Next inlines `NEXT_PUBLIC_*` at build time, so changing the gateway host would mean rebuilding the image. That breaks "config from the environment" and deployment's (F29) "deploy by configuration only". The value is the gateway as the *browser* sees it, so Compose sets `ws://localhost:4001` even for the containerised web app.
 
 ## F8 — Ranking rules
 
@@ -657,7 +658,7 @@ What I found along the way:
 - **Another session's processes:** 5 more headless Chrome instances belong to another project's session on this machine; I left them.
 - **Ingest's ceiling:** one Node process tops out at about 0.95 of a core, near 3,000/s.
 
-The generator reaches 3,000/s cleanly while k6, a JavaScript VM per virtual user competing for the same 8 threads, doesn't, so the likeliest cause is CPU budget on one shared laptop. That's not proven. Next steps: k6 on another machine, and more than one ingest replica (F26).
+The generator reaches 3,000/s cleanly while k6, a JavaScript VM per virtual user competing for the same 8 threads, doesn't, so the likeliest cause is CPU budget on one shared laptop. That's not proven. Next steps: k6 on another machine, and more than one ingest replica (F29).
 
 ## F23 — How "a generator burst is clearly visible as a lag spike and recovery" was verified
 Generator at 800 votes/s for 90 s, a burst to 3,000/s for 45 s (SPEC's burst target), then 90 s at 800/s. The dashboard's own queries were read back from Prometheus, and Grafana was screenshotted (`load-results/grafana-burst-3000.png`):
@@ -703,3 +704,11 @@ A real finished contest: "Tally Finals" (10 contestants, codes F1–F10), 6 minu
 **The gateway is restarted too,** because Redis totals only go up and the gateway only sends what changed: a deleted total produces no diff, so open pages would keep showing the old numbers. After a restart, pages reconnect and get a fresh snapshot.
 **Alternatives:** `docker compose down -v` (also deletes contests, contestants and metrics history); a `--contest` option (not needed yet: the topics hold every contest together).
 **Verified** on a throwaway compose project with no published ports: after 300 votes, it left 0 votes, totals, buckets, dead letters and analytics rows, empty 6-partition topics, and the seed contest with its 10 contestants and `open` status. 100 new votes afterwards counted from zero (96 counted, 4 dead letters, 100 and 4 rows in ClickHouse). Its host-mode check refused to wipe, correctly, while the real stack answered on :4000, and restarted what it had stopped.
+
+## Plan — Three admin features before deployment (F26–F28)
+**Decided:** after F25, three features go in ahead of deployment, so the deployed demo can run a whole contest without a terminal: create a contest, fill it with sample contestants, open it, drive the generator, close it, play its recap. The later features were renumbered (F29 deployment, F30 README, F31–F33 Kubernetes), since only CLAUDE.md's "Next up" and four earlier entries here referred to them.
+- **F26, create contests:** a name creates a draft. Two guards the old flow never needed: names are unique ignoring case (`pnpm recap` names its file after the contest, so two "Finals" would overwrite each other), and a contest can't open without an active contestant. A draft with no votes can be deleted, so test runs don't leave stray contests. Which contest `/` shows stays as it is (the most recently opened open contest, F8).
+- **F27, sample contestants:** a review list rather than filling the existing form, which holds one contestant. Nothing is saved until the admin submits, and all rows are added together or none are. Names come from a hand-written list (CLAUDE.md: no real people); codes follow the contest's initial; colours are spread evenly around the colour wheel so the race and the grid stay readable.
+- **F28, recap in the browser:** played by Remotion's player, not rendered on the server. It's instant, needs no job queue or file storage (the no-local-disk rule would need object storage for MP4s), and costs no server CPU next to the live pipeline. The composition moves into a shared package so the page and `pnpm recap` can't drift apart. `pnpm contests` lists contests with their vote counts, so the ID for `pnpm recap` is easy to find and an empty contest is obvious.
+**Alternatives:** server-side MP4 rendering from the admin page (a separate worker service using every core for about 50 s per render, plus storage for the files); keeping the old numbers and calling the new features F31–F33 (the numbers would no longer follow build order).
+**Not decided yet:** Remotion's licence is free for individuals and companies of up to 3 people; commercial use beyond that would need a company licence.
