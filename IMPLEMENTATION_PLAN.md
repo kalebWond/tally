@@ -423,6 +423,16 @@ In list layout, all ten contestants fit a 1920×1080 screen without scrolling.
 
 The F31 60 fps check at 20,000 votes/s still passes, with no repaints of the stage while live, and the F24, F29, F30 and F31 board checks still pass.
 
+*Decided (F32):* built as planned, with these changes (DECISIONS, F32):
+- **Lower third:** built, then removed at the user's request, because it covered the rows and cards. The footer is a line at the end of the page again.
+- **Header:** a smoked-glass title plate was added for contrast, then removed at the user's request, so the header is as in F31. Over the brightest part of the wall, in a narrow window, the title can drop to about 3:1 and the "votes cast" label to about 2.7:1.
+- **LIVE badge:** a deeper red (`#d7263d`, 5:1 behind white text). The closed state keeps the label "Final".
+- **Quiet sway:** 36 s, not 24.
+- **Row parts:** they now re-measure whenever their row does. This fixes a latent F31 bug: after a swap at the close, a row's content could stay a slot above its panel.
+- **Frame rate:** the 60 fps criterion is dropped. The generator is a mock of the real vote sources, and performance targets apply to the data pipeline, not to the frontend at the generator's maximum rate (the user, after F32).
+
+Verified: the F32 functional check in headless Chrome, on the dev build before the header plate came off. It covered the stage behind the board, row contrast, the spotlight, flicker, the finale, the reload pose, the idle toggle, drafts, reduced motion and transparency, and the ten-row fit. Not rerun afterwards, at the user's request.
+
 ---
 
 ## F33 — Deployment

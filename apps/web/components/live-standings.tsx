@@ -3,14 +3,16 @@
 import type { ContestStatus } from '@tally/contracts';
 import { AnimatePresence, motion } from 'motion/react';
 import { useRouter } from 'next/navigation';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { type CSSProperties, useEffect, useMemo, useRef, useState } from 'react';
 import { backlogParts } from '@/lib/backlog-text';
+import { advance, cueOf, initialLighting, type Lighting, nextChangeAt } from '@/lib/lighting';
 import { EXIT, GENTLE, SNAPPY } from '@/lib/motion';
 import { type Movement, movements } from '@/lib/movement';
 import { type Entrant, rank, titleSize, unknownIds } from '@/lib/standings';
 import { AnimatedNumber } from './animated-number';
 import { ContestantRow, type Layout } from './contestant-row';
-import { LiveDot } from './live-dot';
+import { LiveDot, useTotalSamples } from './live-dot';
+import { HOUSE_COLOURS, Stage } from './stage/stage';
 import { type ConnectionState, useLiveTotals } from './use-live-totals';
 import { VotesPerMinute } from './votes-per-minute';
 
@@ -120,6 +122,60 @@ function useMovements(orderKey: string) {
 }
 
 /**
+ * The stage lighting (F32), advanced on every change of status or of who is first, and again
+ * when a hold or a spotlight runs out. Starts from the first snapshot: before it, who leads is
+ * unknown.
+ */
+function useLighting(status: ContestStatus, leaders: readonly string[], synced: boolean) {
+  const [lighting, setLighting] = useState<Lighting>(initialLighting);
+  const key = leaders.join(',');
+  useEffect(() => {
+    if (!synced) return;
+    const input = { status, leaders: key ? key.split(',') : [] };
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const step = () => {
+      setLighting((l) => {
+        const next = advance(l, input, performance.now());
+        const at = nextChangeAt(next);
+        clearTimeout(timer);
+        if (at !== null) timer = setTimeout(step, Math.max(0, at - performance.now()) + 20);
+        return next;
+      });
+    };
+    step();
+    return () => clearTimeout(timer);
+  }, [status, key, synced]);
+  return lighting;
+}
+
+/** How long the pointer must rest before the operator's controls fade from the picture. */
+const IDLE_MS = 3000;
+
+/**
+ * Whether the pointer has rested and the keyboard been quiet for IDLE_MS (F32): the layout
+ * toggle is for whoever runs the screen, so it steps out of a projector or a recording until
+ * someone reaches for it.
+ */
+function useIdle(ms: number) {
+  const [idle, setIdle] = useState(false);
+  useEffect(() => {
+    let timer = setTimeout(() => setIdle(true), ms);
+    const wake = () => {
+      setIdle(false);
+      clearTimeout(timer);
+      timer = setTimeout(() => setIdle(true), ms);
+    };
+    const events = ['pointermove', 'pointerdown', 'keydown', 'focusin'] as const;
+    for (const e of events) window.addEventListener(e, wake, { passive: true });
+    return () => {
+      clearTimeout(timer);
+      for (const e of events) window.removeEventListener(e, wake);
+    };
+  }, [ms]);
+  return idle;
+}
+
+/**
  * Whether the header is pinned over the list (F31): it sticks on screens with room for it, and
  * only then turns into a translucent bar with a soft edge where the rows pass under it.
  */
@@ -164,6 +220,7 @@ export function LiveStandings({ contest, entrants, gatewayUrl, initialLayout }: 
   // Votes still in the queue (F29). Shown only while the connection is live: stale numbers hide.
   const counting = connection === 'live' ? backlogParts(backlog) : null;
   const [headRef, stuck] = useStuck();
+  const idle = useIdle(IDLE_MS);
   // The gateway's status (F16) wins, so a close shows without a reload; it is null when Redis
   // doesn't know, and then the status this page was rendered with stands.
   const contestStatus = status ?? contest.status;
@@ -178,6 +235,41 @@ export function LiveStandings({ contest, entrants, gatewayUrl, initialLayout }: 
   const stale = synced && connection !== 'live';
   const standings = useMemo(() => rank(entrants, totals), [entrants, totals]);
   const moving = useMovements(standings.map((s) => s.id).join(','));
+  const samples = useTotalSamples(totalVotes, synced);
+  const leaders = useMemo(
+    () => standings.filter((s) => s.rank === 1 && s.total > 0).map((s) => s.id),
+    [standings],
+  );
+  const lighting = useLighting(contestStatus, leaders, synced);
+  // Before the first snapshot the lighting knows nothing: light the stage for the status alone.
+  const cue =
+    lighting.status === null
+      ? contestStatus === 'open'
+        ? 'live'
+        : contestStatus === 'closed'
+          ? 'finale'
+          : 'dark'
+      : cueOf(lighting);
+  const lit = entrants.find((e) => e.id === lighting.shown);
+  const colours = useMemo(
+    () =>
+      lit
+        ? { from: lit.accentFrom ?? HOUSE_COLOURS.from, to: lit.accentTo ?? HOUSE_COLOURS.to }
+        : HOUSE_COLOURS,
+    [lit],
+  );
+  const codeOf = (id: string | undefined) => entrants.find((e) => e.id === id)?.code;
+  const aimFor =
+    cue === 'spotlight'
+      ? [lighting.spotlight?.target, lighting.spotlight?.target]
+      : cue === 'finale'
+        ? [lighting.winners[0], lighting.winners[1] ?? lighting.winners[0]]
+        : [];
+  const [aimLeft, aimRight] = aimFor.map(codeOf);
+  const aimAt = useMemo(
+    () => (aimLeft && aimRight ? ([aimLeft, aimRight] as const) : null),
+    [aimLeft, aimRight],
+  );
 
   // A contestant added after load (F14) has totals but no details: re-run the server
   // component to fetch them. Client state, including the live totals, survives the refresh.
@@ -192,11 +284,23 @@ export function LiveStandings({ contest, entrants, gatewayUrl, initialLayout }: 
 
   return (
     // Reduced-motion users get instant reorders and counters (MotionPreferences, root layout).
-    <main className="board" data-stale={stale || undefined} data-contest={contestStatus}>
+    <main
+      className="board"
+      data-stale={stale || undefined}
+      data-contest={contestStatus}
+      style={{ '--stage-glow': colours.from } as CSSProperties}
+    >
+      <Stage
+        colours={colours}
+        cue={cue}
+        aimAt={aimAt}
+        settled={lighting.finale === 'settled' || lighting.status === null}
+        samples={samples}
+      />
       <header ref={headRef} className="board-head" data-stuck={stuck || undefined}>
         <div className="board-title">
           <span className="board-status" data-state={pill}>
-            <LiveDot beating={pill === 'live'} totalVotes={totalVotes} synced={synced} />
+            <LiveDot beating={pill === 'live'} samples={samples} />
             {STATUS_LABEL[pill]}
           </span>
           <h1 data-size={titleSize(contest.name)} title={contest.name}>
@@ -204,7 +308,7 @@ export function LiveStandings({ contest, entrants, gatewayUrl, initialLayout }: 
           </h1>
         </div>
         <div className="board-side">
-          <fieldset className="board-layout">
+          <fieldset className="board-layout" data-idle={idle || undefined}>
             <legend className="sr-only">Layout</legend>
             {(['list', 'grid'] as const).map((l) => (
               <button
@@ -235,7 +339,7 @@ export function LiveStandings({ contest, entrants, gatewayUrl, initialLayout }: 
             ) : (
               <span className="board-count-value">–</span>
             )}
-            <span className="board-count-label">votes</span>
+            <span className="board-count-label">votes cast</span>
             <AnimatePresence>
               {counting && (
                 <motion.span

@@ -317,7 +317,7 @@ All of it runs on shared spring presets (`apps/web/lib/motion.ts`), and reduced 
 - The board sits on a painted stage: an LED wall in the leader's colours, rig lamps, and a crowd in silhouette.
 - Two searchlights follow the contest. They sway with the vote rate, cross on a new leader and converge on the winner at the close.
 - Rows are smoked-glass panels, with gold for the leader.
-- Broadcast graphics: a LIVE badge and a caption strip along the bottom.
+- Broadcast graphics: a red LIVE badge; the footer stays a line at the end of the page.
 
 The stage is drawn, not photographed, and shows no real people. The operator pages keep the plain look.
 

@@ -1,7 +1,7 @@
 'use client';
 
 import { useReducedMotion } from 'motion/react';
-import { useEffect, useRef } from 'react';
+import { type RefObject, useEffect, useRef } from 'react';
 import { addTotalSample, pulsePeriod, type TotalSample, voteRate } from '@/lib/liveliness';
 
 /** How often the beat's speed is brought up to date with the vote rate. */
@@ -16,17 +16,10 @@ const FOLLOW = 0.35;
  * place in the beat, so it speeds up or slows down smoothly instead of restarting. Still when
  * not live and for anyone who asked for reduced motion.
  */
-export function LiveDot(props: { beating: boolean; totalVotes: number; synced: boolean }) {
-  const { beating, totalVotes, synced } = props;
+export function LiveDot(props: { beating: boolean; samples: RefObject<TotalSample[]> }) {
+  const { beating, samples } = props;
   const reduce = useReducedMotion();
   const dot = useRef<HTMLSpanElement>(null);
-  const samples = useRef<TotalSample[]>([]);
-
-  // Only real readings: the jump from "unknown" to the first snapshot isn't votes arriving.
-  useEffect(() => {
-    if (!synced) return;
-    samples.current = addTotalSample(samples.current, { at: performance.now(), total: totalVotes });
-  }, [totalVotes, synced]);
 
   useEffect(() => {
     const el = dot.current;
@@ -55,7 +48,21 @@ export function LiveDot(props: { beating: boolean; totalVotes: number; synced: b
       beat.cancel();
       delete el.dataset.period;
     };
-  }, [beating, reduce]);
+  }, [beating, reduce, samples]);
 
   return <span ref={dot} className="board-status-dot" aria-hidden />;
+}
+
+/**
+ * Readings of the contest's total over the last few seconds, for the vote rate that sets the
+ * LIVE dot's beat and the searchlights' sway. Only real readings: the jump from "unknown" to
+ * the first snapshot isn't votes arriving.
+ */
+export function useTotalSamples(totalVotes: number, synced: boolean) {
+  const samples = useRef<TotalSample[]>([]);
+  useEffect(() => {
+    if (!synced) return;
+    samples.current = addTotalSample(samples.current, { at: performance.now(), total: totalVotes });
+  }, [totalVotes, synced]);
+  return samples;
 }

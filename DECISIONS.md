@@ -30,6 +30,10 @@ Where the build departs from `SPEC.md` or `IMPLEMENTATION_PLAN.md`, or pins down
 | New contest (plan F31) | "a new contest slides in at the top" | creating a contest opens its contestants page (F26), so rows slide in wherever they arrive while a list is open (added contestants, a refreshed list); notices open to their height so nothing below jumps | F31 |
 | Layout (CLAUDE.md) | `app/admin`, `app/control`, each with a layout for local times | both inside `app/(operator)` (a route group: URLs unchanged), whose one layout renders the times provider and the nav | F31 |
 | Recap video (plan F31) | "only its spring constants aligned" | the winner card's pop is critically damped (it bounced) | F31 |
+| Lower third (plan F32) | the footer becomes a strip pinned to the bottom | none: built, then removed at the user's request (it covered rows and cards); the footer is a line again | F32 |
+| Header (plan F32) | the contest name as a lit sign, text straight on the stage | a glass title plate was added for contrast, then removed at the user's request; the header is as in F31 | F32 |
+| Status label (plan F32) | FINAL becomes "Final results" | still "Final", on a gold plate; the footer already says these are the final results | F32 |
+| Frame rate (plan F32) | the F31 60 fps check at 20,000 votes/s still passes | dropped: the generator is a mock, and performance targets apply to the data pipeline, not the frontend at its maximum rate | F32 |
 | Voter hash (SPEC §5) | `SHA-256` of sender + salt | `HMAC-SHA256`, salt as the key, sender trimmed first | F3 |
 | Idempotency key (SPEC §6, plan F3) | ingest generates one (a UUID) | client `Idempotency-Key` header is honoured; ingest generates a UUID only when absent. Keys are 1–128 visible ASCII, not necessarily UUIDs | F3 |
 | `votes` constraints (SPEC §5) | FK only on `contestants.contest_id` | FKs also on `votes.contest_id`, `votes.contestant_id`, `vote_totals`, `vote_buckets` (no cascades). Contestants with votes can't be deleted, only deactivated | F2 |
@@ -927,3 +931,36 @@ The check ran in headless Chrome at 1,400 px against the `app` stack, with Tally
 - Beams that always sweep (the idea as first suggested).
 - Beams in front of the board: better light, worse numbers.
 - The stage on every page.
+
+## F32 — Stage look: what building it turned up
+**Contrast.**
+- **Rows:** they sit on smoked glass (78% dark, no `backdrop-filter`). With the beams crossing behind them, every total and name measured at least 9:1 against its real background, taken from a screenshot with the text hidden.
+- **Header:** it sits straight on the stage. In a narrow window, the stage scales to fill the height and the LED wall rises behind the header. There the title measured 3.1:1 and the "votes cast" label 2.7:1.
+- **The plate, and why it's gone:** a glass title plate brought both above 7:1. The user preferred the header without it, so it went.
+- **What stayed:** the lighter secondary grey on the board (`#a7afc0`) and the deeper LIVE red, which keep the rest at 4.5:1 or better.
+
+**A latent F31 bug.**
+- **Symptom:** after two rows swapped places just as voting closed, one row's content stayed a slot above its own panel, while the panel below was left empty.
+- **Cause:** each part of a row is a Motion layout node, and it measured only when the list/grid arrangement changed. When the row moved, it re-measured and its parts didn't, so Motion placed them relative to the row from where they used to be. Nothing marked them dirty afterwards.
+- **Fix:** the parts now measure whenever their row does (the row's `place`: arrangement plus index).
+- **Result:** the repro was stuck in 2 of 7 runs before the fix and in none of 6 after. It is the likely cause of the flaky "ends exactly in the slot it took" check in F31.
+
+**Frame rate, and why it isn't a criterion.**
+- **Measurements:** headless Chrome composites in software by default, and the stage's full-screen layers took the board to about 3 fps at the generator's maximum rate. On the laptop's GPU it held 60 fps with no votes arriving. At 20,000 votes/s, with the whole stack saturating the same laptop, about a quarter of frames were late with the stage and about a tenth without it.
+- **Decided:** performance targets apply to the data pipeline (ingest, queue, consumer, gateway). The Go generator is a mock of the real vote sources, and the board isn't benchmarked or tuned against its maximum rate.
+- **Why:** the user's call after F32. A long round of layer changes chasing those frames was undone.
+
+## F32 — How the done-when was verified
+A headless Chrome check at 1920×1080, on the dev build, on Tally Showcase (restored to closed afterwards). It passed on:
+- **The stage:** it sits behind the board; a click on any name or total lands on its row.
+- **Row contrast:** names and totals at 9:1 or better, both with the stage fully lit and with the beams crossing behind the board.
+- **Lead change:** both beams on the new leader's panel 0.6 s after the lead changed. The stage kept its colours at 1.5 s and took the leader's at 3.07 s.
+- **A close race:** 9 lead changes in 7 s, one colour set shown throughout, one spotlight cue.
+- **The finale:** the house dims, both beams rest on the winner's panel, one burst of confetti. Every row's content stays in its panel. A reload shows the end state at once, with no confetti.
+- **Idle toggle:** hidden after 3 s; back on a mouse move and on Tab.
+- **Draft:** a new draft contest keeps the lights down.
+- **Reduced motion:** the beams hold still, a lead change doesn't move them, the finale is a pose, no confetti.
+- **Reduced transparency and more contrast:** solid panels, beams off.
+- **Fit:** all ten rows at 1920×1080. No console errors.
+
+The sway checks were corrected afterwards to compare peak turning speed, and the quiet sway was lengthened to 36 s. The check wasn't rerun after that or after the header plate came off, at the user's request. `lib/lighting.test.ts` covers the cue rules: the hold, the gap between cues, retargeting, the finale seen live versus loaded closed, ties, the aim geometry and the sway period.

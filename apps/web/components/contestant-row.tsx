@@ -55,12 +55,16 @@ export function ContestantRow(props: Props) {
   // Reduced motion: no lift (Motion would otherwise jump the scale rather than skip it).
   const reduce = useReducedMotion();
   const lift = movement === 'up' && !reduce;
+  // What the row's measurements depend on: its arrangement and its place. Its parts measure
+  // with it (F32): a part that kept an old measurement while the row re-measured was placed
+  // relative to the row from where it used to be, and could stay a slot away from its panel.
+  const place = `${layout}:${index}`;
 
   return (
     <motion.li
       layout
       // Measures itself only when its place or the arrangement changes, not on every update.
-      layoutDependency={`${layout}:${index}`}
+      layoutDependency={place}
       transition={SMOOTH}
       // The lift (F31): a rising row grows slightly while it passes, then settles.
       animate={{ scale: lift ? LIFT_SCALE : 1 }}
@@ -79,15 +83,15 @@ export function ContestantRow(props: Props) {
       }
     >
       <Glow leader={leader} />
-      <Rank rank={standing.rank} arranged={layout} />
+      <Rank rank={standing.rank} place={place} />
       <Identity
         name={standing.name}
         code={standing.code}
         imageUrl={standing.imageUrl}
         countryCode={standing.countryCode}
-        arranged={layout}
+        place={place}
       />
-      <motion.span layout="position" layoutDependency={layout} className="row-score">
+      <motion.span layout="position" layoutDependency={place} className="row-score">
         {synced ? (
           <>
             <AnimatedNumber
@@ -107,9 +111,10 @@ export function ContestantRow(props: Props) {
 
 /*
  * The parts below are memoised: the row re-renders on every totals update (4 a second), but
- * only its score changes, so these skip the work unless their own props change. `arranged` is
- * the layout flag: parts measure and animate their own boxes only when it changes, which is
- * what makes a row reshape into its card (and not stretch its text) on List ↔ Grid.
+ * only its score changes, so these skip the work unless their own props change. `place` is the
+ * row's arrangement and position: parts measure their own boxes only when it changes, which is
+ * what makes a row reshape into its card (and not stretch its text) on List ↔ Grid, and keeps
+ * them in step with the row when it moves.
  */
 
 /**
@@ -133,9 +138,9 @@ const Glow = memo(function Glow({ leader }: { leader: boolean }) {
   );
 });
 
-const Rank = memo(function Rank({ rank, arranged }: { rank: number; arranged: Layout }) {
+const Rank = memo(function Rank({ rank, place }: { rank: number; place: string }) {
   return (
-    <motion.span layout="position" layoutDependency={arranged} className="row-rank">
+    <motion.span layout="position" layoutDependency={place} className="row-rank">
       <span className="sr-only">Rank </span>
       <RankRoll rank={rank} />
     </motion.span>
@@ -147,20 +152,20 @@ const Identity = memo(function Identity(props: {
   code: string;
   imageUrl: string | null;
   countryCode: string | null;
-  arranged: Layout;
+  place: string;
 }) {
-  const { name, code, imageUrl, countryCode, arranged } = props;
+  const { name, code, imageUrl, countryCode, place } = props;
   const flag = flagEmoji(countryCode);
   return (
     <>
-      <motion.span layout layoutDependency={arranged} className="row-stripe" aria-hidden="true" />
-      <motion.span layout layoutDependency={arranged} className="row-avatar" aria-hidden="true">
+      <motion.span layout layoutDependency={place} className="row-stripe" aria-hidden="true" />
+      <motion.span layout layoutDependency={place} className="row-avatar" aria-hidden="true">
         {imageUrl && (
           // Generated SVG avatars: nothing for the optimiser to do, so serve them as-is.
           <Image src={imageUrl} alt="" width={104} height={104} unoptimized />
         )}
       </motion.span>
-      <motion.span layout="position" layoutDependency={arranged} className="row-who">
+      <motion.span layout="position" layoutDependency={place} className="row-who">
         <span className="row-name">{name}</span>
         <span className="row-meta">
           <span className="row-code">{code}</span>

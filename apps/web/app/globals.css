@@ -71,6 +71,13 @@
   /* Translucent material for chrome that floats over content (the pinned header, the nav). */
   --glass: color-mix(in srgb, var(--ground) 72%, transparent);
   --glass-blur: blur(20px) saturate(180%);
+
+  /* The results board's stage (F32): gold for the leader, smoked glass for the panels. */
+  --gold: #f2c14e;
+  --gold-ink: #1d1404;
+  --panel: color-mix(in srgb, #0a0d17 78%, transparent);
+  --panel-edge: rgb(255 255 255 / 0.09);
+  --panel-rim: rgb(255 255 255 / 0.14);
 }
 
 @theme inline {
@@ -131,9 +138,135 @@ body {
 .board {
   max-width: 980px;
   margin: 0 auto;
-  padding: clamp(20px, 4vw, 48px) 16px 48px;
+  padding: clamp(20px, 3vw, 36px) 16px 48px;
   display: grid;
-  gap: 28px;
+  gap: 24px;
+  /* The stage sits behind the board and nothing else. */
+  position: relative;
+  isolation: isolate;
+  /* Secondary text sits on glass over a lit stage: a lighter grey keeps it at 4.5:1. */
+  --ink-dim: #a7afc0;
+}
+
+/* Stage (F32) ----------------------------------------------------------------------------- */
+/* A painted scene fixed behind the board (components/stage). Drawn once: only the walls'
+   opacity, the house-light dim and the beams' angles ever change, none of which repaints. */
+.stage {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+  contain: strict;
+  background: #05060b;
+  /* Its own compositor layer: the numbers changing on the board repaint the board's layer, never
+     the stage's blurred drawing behind them. */
+  will-change: transform;
+}
+.stage-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.stage-wall {
+  opacity: 0;
+  transition: opacity 1.2s ease;
+  will-change: opacity;
+}
+.stage-wall[data-shown] {
+  opacity: 1;
+}
+.stage-phone {
+  fill: #b8c8ff;
+  opacity: 0.6;
+}
+.stage-dim {
+  position: absolute;
+  inset: 0;
+  background: #000;
+  opacity: 0;
+  transition: opacity 1s ease;
+}
+/* A searchlight: a cone of light from a lamp hidden behind the audience, turning about its
+   base. The outer element points it (a transition, so a new aim turns from wherever it is),
+   the cone sways about that aim (components/stage/stage.tsx). Soft at the sides (a conic
+   gradient) and fading with distance (a mask). */
+.stage-beam {
+  --rest: 21deg;
+  position: absolute;
+  bottom: 5vh;
+  left: 9%;
+  width: 90vh;
+  height: 160vh;
+  margin-left: -45vh;
+  transform-origin: 50% 100%;
+  transform: rotate(var(--rest));
+  transition:
+    transform 900ms var(--ease-spring),
+    opacity 1s ease;
+  will-change: transform;
+}
+.stage-beam[data-side="right"] {
+  --rest: -21deg;
+  left: 91%;
+}
+.stage-beam-cone {
+  position: absolute;
+  inset: 0;
+  transform-origin: 50% 100%;
+  background: conic-gradient(
+    from -10deg at 50% 100%,
+    transparent 0deg,
+    rgb(214 226 255 / 0.15) 4deg,
+    rgb(232 239 255 / 0.24) 10deg,
+    rgb(214 226 255 / 0.15) 16deg,
+    transparent 20deg
+  );
+  -webkit-mask-image: linear-gradient(to top, #000 5%, rgb(0 0 0 / 0.5) 45%, transparent 90%);
+  mask-image: linear-gradient(to top, #000 5%, rgb(0 0 0 / 0.5) 45%, transparent 90%);
+  will-change: transform;
+}
+/* The lamp itself, glowing between the heads of the audience in front of it. */
+.stage-lamp {
+  position: absolute;
+  bottom: 5vh;
+  left: 9%;
+  width: 36vh;
+  height: 36vh;
+  margin: 0 0 -18vh -18vh;
+  border-radius: 50%;
+  transition: opacity 1s ease;
+  background: radial-gradient(
+    closest-side,
+    rgb(255 255 255 / 0.9),
+    rgb(220 230 255 / 0.45) 22%,
+    rgb(190 205 255 / 0.12) 55%,
+    transparent
+  );
+}
+.stage-lamp[data-side="right"] {
+  left: 91%;
+}
+/* Before the contest opens the house is down and the lamps are off; at the close the house
+   dims further and only the beams on the winner stay bright. */
+.stage[data-cue="dark"] .stage-beam,
+.stage[data-cue="dark"] .stage-lamp {
+  opacity: 0;
+}
+.stage[data-cue="dark"] .stage-dim {
+  opacity: 0.35;
+}
+.stage[data-cue="finale"] .stage-dim {
+  opacity: 0.5;
+}
+.stage-confetti {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
 }
 
 /* Header ---------------------------------------------------------------- */
@@ -210,6 +343,9 @@ body {
   -webkit-line-clamp: 2;
   line-clamp: 2;
   overflow: hidden;
+  /* A lit sign (F32): the glow is a filter, so the line clamp's clipping doesn't cut it off. */
+  filter: drop-shadow(0 0 16px color-mix(in srgb, var(--stage-glow, #6b7cff) 65%, transparent))
+    drop-shadow(0 2px 8px rgb(0 0 0 / 0.6));
 }
 .board-title h1[data-size="long"] {
   font-size: clamp(28px, 4.6vw, 44px);
@@ -239,9 +375,11 @@ body {
   background: var(--ink-dim);
   transition: background-color var(--dur-smooth) ease;
 }
+/* A LIVE bug (F32): white on a deeper red than --live, which is 3.5:1 behind small text. */
 .board-status[data-state="live"] {
-  color: var(--ink);
-  border-color: color-mix(in srgb, var(--live) 50%, var(--line));
+  color: #fff;
+  background: #d7263d;
+  border-color: #d7263d;
 }
 .board-status {
   transition:
@@ -251,7 +389,7 @@ body {
 }
 /* Live: the dot's beat is set by the vote rate (components/live-dot.tsx). */
 .board-status[data-state="live"] .board-status-dot {
-  background: var(--live);
+  background: #fff;
 }
 .board-status[data-state="connecting"] .board-status-dot {
   background: var(--warn);
@@ -269,12 +407,12 @@ body {
 }
 /* Contest closed (F16): a settled, solid mark, no pulse. */
 .board-status[data-state="final"] {
-  color: var(--ground);
-  background: var(--ink);
-  border-color: var(--ink);
+  color: var(--gold-ink);
+  background: linear-gradient(180deg, #ffdc86, var(--gold) 55%, #d9a33a);
+  border-color: var(--gold);
 }
 .board-status[data-state="final"] .board-status-dot {
-  background: var(--ground);
+  background: var(--gold-ink);
 }
 
 .board-count {
@@ -340,9 +478,14 @@ body {
   grid-template-columns: 2.6rem 6px 52px minmax(0, 1fr) auto;
   align-items: center;
   gap: 0 16px;
-  padding: 10px 20px 10px 12px;
-  background: var(--surface);
-  border: 1px solid var(--line);
+  padding: 9px 20px 9px 12px;
+  /* Smoked glass (F32): the stage shows through, and the rig lights catch the top edge. No
+     backdrop blur: the stage is already out of focus, and ten moving blurs would cost frames. */
+  background: linear-gradient(180deg, rgb(255 255 255 / 0.05), transparent 45%), var(--panel);
+  border: 1px solid var(--panel-edge);
+  box-shadow:
+    inset 0 1px 0 var(--panel-rim),
+    0 12px 30px -18px rgb(0 0 0 / 0.9);
   border-radius: 6px;
   /* z-index needs a positioned box: the overtaking row draws above the rows it passes. */
   position: relative;
@@ -368,17 +511,17 @@ body {
   transition-duration: 120ms;
 }
 /* The leader's highlight: one element, handed from leader to leader (contestant-row.tsx). */
+/* Gold (F32): a gold rim and a warm light from above. */
 .row-glow {
   position: absolute;
   inset: -1px;
   z-index: -1;
-  border: 1px solid color-mix(in srgb, var(--accent-from) 45%, var(--line));
+  border: 1px solid color-mix(in srgb, var(--gold) 80%, transparent);
   border-radius: inherit;
-  background: linear-gradient(
-    90deg,
-    color-mix(in srgb, var(--accent-from) 16%, var(--raised)),
-    var(--raised) 55%
-  );
+  background: linear-gradient(180deg, rgb(255 206 110 / 0.2), rgb(255 206 110 / 0.05) 60%);
+  box-shadow:
+    inset 0 1px 0 rgb(255 226 160 / 0.45),
+    0 0 36px -8px rgb(242 193 78 / 0.55);
   pointer-events: none;
 }
 /* "+128" rising from the total as votes arrive, then gone (contestant-row.tsx). */
@@ -426,7 +569,7 @@ body {
   color: var(--ink-dim);
 }
 .row[data-leader] .row-rank {
-  color: var(--ink);
+  color: var(--gold);
 }
 .row-rank-roll {
   position: relative;
@@ -509,9 +652,17 @@ body {
   margin: 0;
   padding: 0;
   min-width: 0;
-  border: 1px solid var(--line);
+  background: var(--panel);
+  border: 1px solid var(--panel-edge);
   border-radius: 4px;
   overflow: hidden;
+}
+/* Hidden while the pointer rests (F32), back on a move or when focused from the keyboard. */
+.board-layout {
+  transition: opacity var(--dur-smooth) ease;
+}
+.board-layout[data-idle]:not(:focus-within) {
+  opacity: 0;
 }
 .board-layout button {
   position: relative;
@@ -566,17 +717,16 @@ body {
   padding: 0 16px 14px;
   border-radius: 10px;
   background:
-    linear-gradient(180deg, transparent 35%, var(--surface) 92%),
+    linear-gradient(180deg, transparent 35%, var(--panel) 90%),
     linear-gradient(
       150deg,
-      color-mix(in srgb, var(--accent-from) 55%, var(--surface)),
-      color-mix(in srgb, var(--accent-to) 40%, var(--surface))
-    );
+      color-mix(in srgb, var(--accent-from) 45%, transparent),
+      color-mix(in srgb, var(--accent-to) 25%, transparent)
+    ),
+    var(--panel);
 }
 .row[data-layout="grid"] .row-glow {
-  border-color: color-mix(in srgb, var(--accent-from) 70%, var(--line));
-  background: none;
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-from) 45%, transparent);
+  background: linear-gradient(180deg, rgb(255 206 110 / 0.14), transparent 50%);
 }
 .row[data-layout="grid"] .row-stripe {
   grid-area: stripe;
@@ -627,9 +777,10 @@ body {
   display: grid;
   gap: 10px;
   padding: 16px 16px 10px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--panel-edge);
   border-radius: 6px;
-  background: var(--surface);
+  background: var(--panel);
+  box-shadow: inset 0 1px 0 var(--panel-rim);
 }
 .board-chart-head {
   display: flex;
@@ -730,6 +881,23 @@ body {
   }
   25% {
     opacity: 1;
+  }
+}
+/* Reduced transparency or more contrast (F32): the board's panels are solid and the beams are
+   off, so nothing behind the text moves or shows through. */
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  .board {
+    --panel: #0b0e18;
+  }
+  .stage-beam,
+  .stage-lamp {
+    display: none;
+  }
+}
+@media (prefers-contrast: more) {
+  .board {
+    --ink-dim: #c3c9d6;
+    --panel-edge: rgb(255 255 255 / 0.28);
   }
 }
 /* Reduced transparency: the pinned header is solid. More contrast: firmer edges. */
