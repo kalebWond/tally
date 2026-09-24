@@ -2,7 +2,6 @@ import { DEAD_LETTER_REASONS, DeadLetterQuery } from '@tally/contracts';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { connection } from 'next/server';
-import { AdminNav } from '@/components/admin/admin-nav';
 import { ContestPicker } from '@/components/admin/contest-picker';
 import { DeadLetterTable, NewDeadLetters } from '@/components/admin/dead-letters';
 import { Button } from '@/components/ui/button';
@@ -61,91 +60,82 @@ export default async function DeadLettersPage(props: PageProps<'/admin/dead-lett
   const contestNames = Object.fromEntries(contests.map((c) => [c.id, c.name]));
 
   return (
-    <>
-      <AdminNav current="/admin/dead-letters" />
-      <main className="mx-auto grid w-full max-w-6xl gap-6 px-4 py-8">
-        <header className="flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <p className="text-sm tracking-widest text-muted-foreground uppercase">Tally · admin</p>
-            <h1 className="font-heading text-4xl font-bold tracking-wide uppercase">
-              Dead letters
-            </h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Votes that were accepted but couldn't be counted, with the reason. Nothing is dropped
-              silently.
-            </p>
-          </div>
-          <ContestPicker
-            contests={contests}
-            value={contestParam}
-            allValue={ALL}
-            basePath="/admin/dead-letters"
-          />
-        </header>
-
-        <nav aria-label="Reason" className="flex flex-wrap gap-2">
-          <Chip
-            href={href({ reason: undefined, before: undefined, after: undefined })}
-            active={!q.reason}
-            testId="reason-all"
-          >
-            All <Count n={counts.total} />
-          </Chip>
-          {DEAD_LETTER_REASONS.map((r) => (
-            <Chip
-              key={r}
-              href={href({ reason: r, before: undefined, after: undefined })}
-              active={q.reason === r}
-              testId={`reason-${r}`}
-            >
-              {REASON_LABEL[r]} <Count n={counts.byReason[r]} testId={`count-${r}`} />
-            </Chip>
-          ))}
-        </nav>
-
-        <NewDeadLetters
-          contestId={q.contestId}
-          reason={q.reason}
-          since={counts.latestId ?? 0}
-          newestHref={newestHref}
-        />
-
-        <DeadLetterTable
-          items={page.items}
-          contestNames={contestNames}
-          reasonLabels={REASON_LABEL}
-        />
-
-        <div className="flex items-center justify-between">
-          <Button variant="outline" asChild={page.newer !== null} disabled={page.newer === null}>
-            {page.newer !== null ? (
-              <Link href={href({ after: page.newer, before: undefined })} data-testid="newer">
-                ← Newer
-              </Link>
-            ) : (
-              <span>← Newer</span>
-            )}
-          </Button>
-          {(q.before !== undefined || q.after !== undefined) && (
-            <Link
-              href={newestHref}
-              className="text-sm text-muted-foreground underline-offset-4 hover:underline"
-            >
-              Back to newest
-            </Link>
-          )}
-          <Button variant="outline" asChild={page.older !== null} disabled={page.older === null}>
-            {page.older !== null ? (
-              <Link href={href({ before: page.older, after: undefined })} data-testid="older">
-                Older →
-              </Link>
-            ) : (
-              <span>Older →</span>
-            )}
-          </Button>
+    <main className="mx-auto grid w-full max-w-6xl gap-6 px-4 py-8">
+      <header className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <p className="text-sm tracking-widest text-muted-foreground uppercase">Tally · admin</p>
+          <h1 className="font-heading text-4xl font-bold tracking-wide uppercase">Dead letters</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Votes that were accepted but couldn't be counted, with the reason. Nothing is dropped
+            silently.
+          </p>
         </div>
-      </main>
-    </>
+        <ContestPicker
+          contests={contests}
+          value={contestParam}
+          allValue={ALL}
+          basePath="/admin/dead-letters"
+        />
+      </header>
+
+      <nav aria-label="Reason" className="flex flex-wrap gap-2">
+        <Chip
+          href={href({ reason: undefined, before: undefined, after: undefined })}
+          active={!q.reason}
+          testId="reason-all"
+        >
+          All <Count n={counts.total} />
+        </Chip>
+        {DEAD_LETTER_REASONS.map((r) => (
+          <Chip
+            key={r}
+            href={href({ reason: r, before: undefined, after: undefined })}
+            active={q.reason === r}
+            testId={`reason-${r}`}
+          >
+            {REASON_LABEL[r]} <Count n={counts.byReason[r]} testId={`count-${r}`} />
+          </Chip>
+        ))}
+      </nav>
+
+      <NewDeadLetters
+        contestId={q.contestId}
+        reason={q.reason}
+        since={counts.latestId ?? 0}
+        newestHref={newestHref}
+      />
+
+      <DeadLetterTable items={page.items} contestNames={contestNames} reasonLabels={REASON_LABEL} />
+
+      <div className="flex items-center justify-between">
+        <Button variant="outline" asChild={page.newer !== null} disabled={page.newer === null}>
+          {page.newer !== null ? (
+            <Link href={href({ after: page.newer, before: undefined })} data-testid="newer">
+              ← Newer
+            </Link>
+          ) : (
+            <span>← Newer</span>
+          )}
+        </Button>
+        {(q.before !== undefined || q.after !== undefined) && (
+          <Link
+            href={newestHref}
+            className="text-sm text-muted-foreground underline-offset-4 hover:underline"
+          >
+            Back to newest
+          </Link>
+        )}
+        <Button variant="outline" asChild={page.older !== null} disabled={page.older === null}>
+          {page.older !== null ? (
+            <Link href={href({ before: page.older, after: undefined })} data-testid="older">
+              Older →
+            </Link>
+          ) : (
+            <span>Older →</span>
+          )}
+        </Button>
+      </div>
+    </main>
   );
 }
 

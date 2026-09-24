@@ -335,7 +335,9 @@ function Winner({ contestants, totalVotes }: RecapData) {
   const winner = contestants[0];
   const runnerUp = contestants[1];
   if (!winner) return null;
-  const pop = spring({ frame: frame - 10, fps, config: { damping: 14, stiffness: 90 } });
+  // The web app's GENTLE preset (F31): critically damped, ~0.45 s. It used to bounce, but
+  // nothing threw the winner card, so there's no momentum for it to overshoot with.
+  const pop = spring({ frame: frame - 10, fps, config: { damping: 28, stiffness: 195 } });
   const text = interpolate(frame, [35, 60], [0, 1], {
     extrapolateLeft: 'clamp',
     extrapolateRight: 'clamp',

@@ -1,8 +1,17 @@
 'use client';
 
-import { type MotionStyle, motion, type Transition } from 'motion/react';
+import {
+  AnimatePresence,
+  type MotionStyle,
+  motion,
+  useReducedMotion,
+  type Variants,
+} from 'motion/react';
 import Image from 'next/image';
+import { memo, useEffect, useRef, useState } from 'react';
 import { flagEmoji } from '@/lib/flag';
+import { BURST_GAP_MS, type BurstState, nextBurst } from '@/lib/liveliness';
+import { SMOOTH, SNAPPY } from '@/lib/motion';
 import type { Movement } from '@/lib/movement';
 import type { Standing } from '@/lib/standings';
 import { AnimatedNumber } from './animated-number';
@@ -10,12 +19,11 @@ import { AnimatedNumber } from './animated-number';
 const DEFAULT_FROM = '#4B5563';
 const DEFAULT_TO = '#1F2937';
 
-/**
- * Reorder glide. No bounce: an overshooting spring would push a row past its slot into its
- * neighbour's and back. Interrupted mid-flight (another overtake), Motion restarts from the
- * row's current on-screen position, so rapid swaps never snap.
- */
-const REORDER: Transition = { type: 'spring', bounce: 0, duration: 0.45 };
+/** The leader highlight's handover takes as long as the glide it happens during. */
+const HANDOFF = { duration: 0.45, ease: 'easeOut' } as const;
+
+/** How much a row grows while it overtakes: enough to read as lifted, not enough to blur text. */
+const LIFT_SCALE = 1.02;
 
 export type Layout = 'list' | 'grid';
 
@@ -23,10 +31,12 @@ interface Props {
   standing: Standing;
   /** List row or grid card: the same element and children either way, arranged by CSS (F24). */
   layout: Layout;
+  /** Its place in the standings: a change is what makes the row measure itself and glide. */
+  index: number;
   leader: boolean;
   /** Before the first snapshot the total is unknown, so show a dash rather than a false zero. */
   synced: boolean;
-  /** Set briefly after an overtake: a rising row draws above the rows it passes, and glows. */
+  /** Set briefly after an overtake: a rising row lifts above the rows it passes. */
   movement?: Movement | undefined;
 }
 
@@ -38,20 +48,27 @@ interface Props {
  * CSS arranges it. Switching therefore never remounts anything, so the counter's spring, the
  * overtake treatment and the live feed carry straight on (CLAUDE.md: one component, two layouts).
  */
-export function ContestantRow({ standing, layout, leader, synced, movement }: Props) {
-  const flag = flagEmoji(standing.countryCode);
+export function ContestantRow(props: Props) {
+  const { standing, layout, index, leader, synced, movement } = props;
   const from = standing.accentFrom ?? DEFAULT_FROM;
   const to = standing.accentTo ?? DEFAULT_TO;
+  // Reduced motion: no lift (Motion would otherwise jump the scale rather than skip it).
+  const reduce = useReducedMotion();
+  const lift = movement === 'up' && !reduce;
 
   return (
     <motion.li
-      // Position only: rows never change size, so no scale distortion of text or avatars.
-      layout="position"
-      transition={REORDER}
+      layout
+      // Measures itself only when its place or the arrangement changes, not on every update.
+      layoutDependency={`${layout}:${index}`}
+      transition={SMOOTH}
+      // The lift (F31): a rising row grows slightly while it passes, then settles.
+      animate={{ scale: lift ? LIFT_SCALE : 1 }}
       className="row"
       data-layout={layout}
       data-leader={leader || undefined}
       data-rising={movement === 'up' || undefined}
+      data-moved={movement ? true : undefined}
       data-code={standing.code}
       style={
         {
@@ -61,49 +78,179 @@ export function ContestantRow({ standing, layout, leader, synced, movement }: Pr
         } as MotionStyle
       }
     >
-      <span className="row-rank">
-        <span className="sr-only">Rank </span>
-        {standing.rank}
-      </span>
-      <span className="row-stripe" aria-hidden="true" />
-      {standing.imageUrl ? (
-        // Generated SVG avatars: nothing for the optimiser to do, so serve them as-is.
-        <Image
-          className="row-avatar"
-          src={standing.imageUrl}
-          alt=""
-          width={52}
-          height={52}
-          unoptimized
+      <Glow leader={leader} />
+      <Rank rank={standing.rank} arranged={layout} />
+      <Identity
+        name={standing.name}
+        code={standing.code}
+        imageUrl={standing.imageUrl}
+        countryCode={standing.countryCode}
+        arranged={layout}
+      />
+      <motion.span layout="position" layoutDependency={layout} className="row-score">
+        {synced ? (
+          <>
+            <AnimatedNumber
+              className="row-total"
+              value={standing.total}
+              data-testid={`total-${standing.code}`}
+            />
+            <VoteBurst total={standing.total} />
+          </>
+        ) : (
+          <span className="row-total">–</span>
+        )}
+      </motion.span>
+    </motion.li>
+  );
+}
+
+/*
+ * The parts below are memoised: the row re-renders on every totals update (4 a second), but
+ * only its score changes, so these skip the work unless their own props change. `arranged` is
+ * the layout flag: parts measure and animate their own boxes only when it changes, which is
+ * what makes a row reshape into its card (and not stretch its text) on List ↔ Grid.
+ */
+
+/**
+ * The leader's highlight, handed over during an overtake: it fades in on the new leader as it
+ * glides up into first place, and out on the old one as it drops. It moves with its row, so it
+ * can never jump.
+ */
+const Glow = memo(function Glow({ leader }: { leader: boolean }) {
+  return (
+    <AnimatePresence initial={false}>
+      {leader && (
+        <motion.span
+          className="row-glow"
+          aria-hidden="true"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1, transition: HANDOFF }}
+          exit={{ opacity: 0, transition: HANDOFF }}
         />
-      ) : (
-        <span className="row-avatar" aria-hidden="true" />
       )}
-      <span className="row-who">
-        <span className="row-name">{standing.name}</span>
+    </AnimatePresence>
+  );
+});
+
+const Rank = memo(function Rank({ rank, arranged }: { rank: number; arranged: Layout }) {
+  return (
+    <motion.span layout="position" layoutDependency={arranged} className="row-rank">
+      <span className="sr-only">Rank </span>
+      <RankRoll rank={rank} />
+    </motion.span>
+  );
+});
+
+const Identity = memo(function Identity(props: {
+  name: string;
+  code: string;
+  imageUrl: string | null;
+  countryCode: string | null;
+  arranged: Layout;
+}) {
+  const { name, code, imageUrl, countryCode, arranged } = props;
+  const flag = flagEmoji(countryCode);
+  return (
+    <>
+      <motion.span layout layoutDependency={arranged} className="row-stripe" aria-hidden="true" />
+      <motion.span layout layoutDependency={arranged} className="row-avatar" aria-hidden="true">
+        {imageUrl && (
+          // Generated SVG avatars: nothing for the optimiser to do, so serve them as-is.
+          <Image src={imageUrl} alt="" width={104} height={104} unoptimized />
+        )}
+      </motion.span>
+      <motion.span layout="position" layoutDependency={arranged} className="row-who">
+        <span className="row-name">{name}</span>
         <span className="row-meta">
-          <span className="row-code">{standing.code}</span>
-          {standing.countryCode && (
+          <span className="row-code">{code}</span>
+          {countryCode && (
             <span className="row-country">
               {flag && (
                 <span className="row-flag" aria-hidden="true">
                   {flag}
                 </span>
               )}
-              {standing.countryCode}
+              {countryCode}
             </span>
           )}
         </span>
-      </span>
-      {synced ? (
-        <AnimatedNumber
-          className="row-total"
-          value={standing.total}
-          data-testid={`total-${standing.code}`}
-        />
-      ) : (
-        <span className="row-total">–</span>
-      )}
-    </motion.li>
+      </motion.span>
+    </>
+  );
+});
+
+const ROLL: Variants = {
+  enter: (up: boolean) => ({ y: up ? '90%' : '-90%', opacity: 0 }),
+  center: { y: 0, opacity: 1 },
+  exit: (up: boolean) => ({ y: up ? '-90%' : '90%', opacity: 0 }),
+};
+
+/**
+ * The rank, rolling like an odometer when it changes: moving up, the new number rises in from
+ * below and the old one leaves upward; moving down, the reverse.
+ */
+function RankRoll({ rank }: { rank: number }) {
+  const [last, setLast] = useState(rank);
+  const [up, setUp] = useState(true);
+  if (rank !== last) {
+    setLast(rank);
+    setUp(rank < last);
+  }
+  return (
+    <span className="row-rank-roll">
+      <AnimatePresence initial={false} mode="popLayout" custom={up}>
+        <motion.span
+          key={rank}
+          custom={up}
+          variants={ROLL}
+          initial="enter"
+          animate="center"
+          exit="exit"
+          transition={SNAPPY}
+        >
+          {rank}
+        </motion.span>
+      </AnimatePresence>
+    </span>
+  );
+}
+
+const plus = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 });
+
+/**
+ * "+128" floating up from a total as votes arrive: at most one per BURST_GAP_MS, with gains in
+ * between added to the next, so a busy row pulses steadily instead of fizzing. A gain that lands
+ * inside the gap is shown when the gap ends, even if no further frame arrives.
+ */
+function VoteBurst({ total }: { total: number }) {
+  const state = useRef<BurstState | null>(null);
+  const latest = useRef(total);
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const [burst, setBurst] = useState<{ id: number; amount: number } | null>(null);
+
+  useEffect(() => {
+    latest.current = total;
+    const run = () => {
+      timer.current = undefined;
+      const r = nextBurst(state.current, latest.current, performance.now());
+      state.current = r.state;
+      if (r.burst !== null) {
+        const amount = r.burst;
+        setBurst((b) => ({ id: (b?.id ?? 0) + 1, amount }));
+      } else if (r.pending && timer.current === undefined) {
+        timer.current = setTimeout(run, Math.max(0, r.state.at + BURST_GAP_MS - performance.now()));
+      }
+    };
+    if (timer.current === undefined) run();
+  }, [total]);
+
+  useEffect(() => () => clearTimeout(timer.current), []);
+
+  if (!burst) return null;
+  return (
+    <span key={burst.id} className="row-burst" aria-hidden="true">
+      +{plus.format(burst.amount)}
+    </span>
   );
 }

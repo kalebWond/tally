@@ -2,8 +2,11 @@
 
 import { type Contest, ErrorResponse } from '@tally/contracts';
 import { Clapperboard, ExternalLink, Plus, Trash2, Users } from 'lucide-react';
+import { AnimatePresence, LayoutGroup, motion } from 'motion/react';
 import { useRouter } from 'next/navigation';
 import { type FormEvent, useState } from 'react';
+import { BusyLabel } from '@/components/busy-label';
+import { PresenceRow } from '@/components/presence-row';
 import { Time, useTimeZone } from '@/components/time';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -25,6 +28,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { APPEAR, EXIT, EXPAND, GENTLE, SMOOTH, SNAPPY } from '@/lib/motion';
 import { fullTime } from '@/lib/time';
 
 type Action = { contest: Contest; to: 'open' | 'closed' };
@@ -192,7 +196,7 @@ export function ContestsAdmin({
   }
 
   return (
-    <main className="mx-auto grid w-full max-w-6xl gap-6 px-4 py-8">
+    <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-8">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="text-sm tracking-widest text-muted-foreground uppercase">Tally · admin</p>
@@ -210,17 +214,21 @@ export function ContestsAdmin({
         </Button>
       </header>
 
-      {notice && (
-        <p
-          role="status"
-          data-testid="notice"
-          className={`rounded-lg border px-4 py-3 text-sm ${
-            notice.tone === 'ok' ? 'bg-muted/40' : 'border-destructive/40 bg-destructive/10'
-          }`}
-        >
-          {notice.text}
-        </p>
-      )}
+      <AnimatePresence>
+        {notice && (
+          <motion.div key="notice" {...EXPAND} className="overflow-hidden">
+            <p
+              role="status"
+              data-testid="notice"
+              className={`rounded-lg border px-4 py-3 text-sm ${
+                notice.tone === 'ok' ? 'bg-muted/40' : 'border-destructive/40 bg-destructive/10'
+              }`}
+            >
+              {notice.text}
+            </p>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <fieldset className="flex flex-wrap gap-2" data-testid="status-filter">
         <legend className="sr-only">Show</legend>
@@ -228,13 +236,23 @@ export function ContestsAdmin({
           <Button
             key={f}
             size="sm"
-            variant={filter === f ? 'secondary' : 'ghost'}
+            variant="ghost"
+            className="relative isolate"
             aria-pressed={filter === f}
             data-filter={f}
             onClick={() => chooseFilter(f)}
           >
             {FILTER_LABEL[f]}
             <span className="tabular-nums text-muted-foreground">{count(f)}</span>
+            {filter === f && (
+              // One pill, sliding to the chosen filter.
+              <motion.span
+                layoutId="filter-pill"
+                data-pill
+                className="absolute inset-0 -z-10 rounded-[inherit] bg-secondary"
+                transition={SNAPPY}
+              />
+            )}
           </Button>
         ))}
       </fieldset>
@@ -252,84 +270,112 @@ export function ContestsAdmin({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {shown.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">
-                  No {filter === 'all' ? '' : `${filter} `}contests.
-                </TableCell>
-              </TableRow>
-            )}
-            {shown.map((c) => {
-              const action = ACTION[c.status];
-              return (
-                <TableRow key={c.id} data-contest={c.id} data-status={c.status}>
-                  <TableCell className="font-medium">{c.name}</TableCell>
-                  <TableCell>
-                    <Badge className={`uppercase ${STATUS_TONE[c.status]}`}>{c.status}</Badge>
-                  </TableCell>
-                  <TableCell
-                    className="text-right tabular-nums"
-                    data-testid={`contestants-${c.id}`}
-                  >
-                    {contestantCounts[c.id] ?? 0}
-                  </TableCell>
-                  <TableCell className="tabular-nums text-muted-foreground">
-                    {c.opensAt ? (
-                      <Time iso={c.opensAt} />
-                    ) : c.status === 'draft' ? (
-                      '—'
-                    ) : (
-                      'since creation'
-                    )}
-                  </TableCell>
-                  <TableCell className="tabular-nums text-muted-foreground">
-                    {c.closesAt ? <Time iso={c.closesAt} /> : '—'}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex justify-end gap-2">
-                      <Button variant="outline" size="sm" asChild>
-                        <a href={`/admin/contestants?contest=${c.id}`}>
-                          <Users /> Contestants
-                        </a>
-                      </Button>
-                      {c.status !== 'draft' && (
-                        <Button variant="outline" size="sm" asChild>
-                          <a href={`/admin/recap/${c.id}`} data-testid={`recap-${c.id}`}>
-                            <Clapperboard /> Recap
-                          </a>
-                        </Button>
-                      )}
-                      <Button variant="outline" size="sm" asChild>
-                        <a href={`/results/${c.id}`} target="_blank" rel="noreferrer">
-                          Results <ExternalLink />
-                        </a>
-                      </Button>
-                      {action && (
-                        <Button
-                          size="sm"
-                          data-testid={`status-${c.id}`}
-                          variant={action.to === 'closed' ? 'destructive' : 'default'}
-                          onClick={() => setConfirm({ contest: c, to: action.to })}
-                        >
-                          {action.label}
-                        </Button>
-                      )}
-                      {c.status === 'draft' && (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          data-testid={`delete-${c.id}`}
-                          aria-label={`Delete ${c.name}`}
-                          onClick={() => setDeleting(c)}
-                        >
-                          <Trash2 />
-                        </Button>
-                      )}
-                    </div>
-                  </TableCell>
-                </TableRow>
-              );
-            })}
+            {/* Rows that arrive slide in; a deleted or filtered-out row fades, and the rows
+                below glide up into its place (F31). Nothing animates on first load. */}
+            {/* The group lets the rows below measure and glide once a removed row has gone. */}
+            <LayoutGroup>
+              <AnimatePresence initial={false}>
+                {shown.length === 0 && (
+                  <PresenceRow key="empty" {...APPEAR}>
+                    <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">
+                      No {filter === 'all' ? '' : `${filter} `}contests.
+                    </TableCell>
+                  </PresenceRow>
+                )}
+                {shown.map((c) => {
+                  const action = ACTION[c.status];
+                  return (
+                    <PresenceRow
+                      key={c.id}
+                      layout="position"
+                      transition={SMOOTH}
+                      initial={{ opacity: 0, y: -8 }}
+                      animate={{ opacity: 1, y: 0, transition: GENTLE }}
+                      exit={{ opacity: 0, transition: EXIT }}
+                      data-contest={c.id}
+                      data-status={c.status}
+                    >
+                      <TableCell className="font-medium">{c.name}</TableCell>
+                      <TableCell className="relative">
+                        <AnimatePresence initial={false} mode="popLayout">
+                          <motion.span
+                            key={c.status}
+                            className="inline-flex"
+                            initial={{ opacity: 0, scale: 0.85 }}
+                            animate={{ opacity: 1, scale: 1, transition: SNAPPY }}
+                            exit={{ opacity: 0, scale: 0.85, transition: EXIT }}
+                          >
+                            <Badge className={`uppercase ${STATUS_TONE[c.status]}`}>
+                              {c.status}
+                            </Badge>
+                          </motion.span>
+                        </AnimatePresence>
+                      </TableCell>
+                      <TableCell
+                        className="text-right tabular-nums"
+                        data-testid={`contestants-${c.id}`}
+                      >
+                        {contestantCounts[c.id] ?? 0}
+                      </TableCell>
+                      <TableCell className="tabular-nums text-muted-foreground">
+                        {c.opensAt ? (
+                          <Time iso={c.opensAt} />
+                        ) : c.status === 'draft' ? (
+                          '—'
+                        ) : (
+                          'since creation'
+                        )}
+                      </TableCell>
+                      <TableCell className="tabular-nums text-muted-foreground">
+                        {c.closesAt ? <Time iso={c.closesAt} /> : '—'}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex justify-end gap-2">
+                          <Button variant="outline" size="sm" asChild>
+                            <a href={`/admin/contestants?contest=${c.id}`}>
+                              <Users /> Contestants
+                            </a>
+                          </Button>
+                          {c.status !== 'draft' && (
+                            <Button variant="outline" size="sm" asChild>
+                              <a href={`/admin/recap/${c.id}`} data-testid={`recap-${c.id}`}>
+                                <Clapperboard /> Recap
+                              </a>
+                            </Button>
+                          )}
+                          <Button variant="outline" size="sm" asChild>
+                            <a href={`/results/${c.id}`} target="_blank" rel="noreferrer">
+                              Results <ExternalLink />
+                            </a>
+                          </Button>
+                          {action && (
+                            <Button
+                              size="sm"
+                              data-testid={`status-${c.id}`}
+                              variant={action.to === 'closed' ? 'destructive' : 'default'}
+                              onClick={() => setConfirm({ contest: c, to: action.to })}
+                            >
+                              {action.label}
+                            </Button>
+                          )}
+                          {c.status === 'draft' && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              data-testid={`delete-${c.id}`}
+                              aria-label={`Delete ${c.name}`}
+                              onClick={() => setDeleting(c)}
+                            >
+                              <Trash2 />
+                            </Button>
+                          )}
+                        </div>
+                      </TableCell>
+                    </PresenceRow>
+                  );
+                })}
+              </AnimatePresence>
+            </LayoutGroup>
           </TableBody>
         </Table>
       </div>
@@ -354,7 +400,7 @@ export function ContestsAdmin({
                   disabled={busy}
                   onClick={() => apply(confirm)}
                 >
-                  {busy ? 'Working…' : ACTION[confirm.contest.status]?.label}
+                  {busy ? <BusyLabel>Working…</BusyLabel> : ACTION[confirm.contest.status]?.label}
                 </Button>
               </DialogFooter>
             </>
@@ -385,11 +431,19 @@ export function ContestsAdmin({
                 aria-describedby={createError ? 'contest-name-error' : undefined}
                 onChange={(e) => setNewName(e.target.value)}
               />
-              {createError && (
-                <p id="contest-name-error" role="alert" className="text-sm text-destructive">
-                  {createError}
-                </p>
-              )}
+              <AnimatePresence>
+                {createError && (
+                  <motion.p
+                    key="error"
+                    {...APPEAR}
+                    id="contest-name-error"
+                    role="alert"
+                    className="text-sm text-destructive"
+                  >
+                    {createError}
+                  </motion.p>
+                )}
+              </AnimatePresence>
             </div>
             <DialogFooter>
               <Button
@@ -401,7 +455,7 @@ export function ContestsAdmin({
                 Cancel
               </Button>
               <Button type="submit" data-testid="create-contest" disabled={busy || !newName.trim()}>
-                {busy ? 'Creating…' : 'Create draft'}
+                {busy ? <BusyLabel>Creating…</BusyLabel> : 'Create draft'}
               </Button>
             </DialogFooter>
           </form>
@@ -429,7 +483,7 @@ export function ContestsAdmin({
                   disabled={busy}
                   onClick={() => remove(deleting)}
                 >
-                  {busy ? 'Deleting…' : 'Delete draft'}
+                  {busy ? <BusyLabel>Deleting…</BusyLabel> : 'Delete draft'}
                 </Button>
               </DialogFooter>
             </>

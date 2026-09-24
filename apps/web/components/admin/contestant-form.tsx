@@ -2,11 +2,14 @@
 
 import { avatarUrl, type Contestant, ErrorResponse } from '@tally/contracts';
 import { Sparkles } from 'lucide-react';
+import { motion } from 'motion/react';
 import Image from 'next/image';
 import { type FormEvent, type ReactNode, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { APPEAR } from '@/lib/motion';
+import { BusyLabel } from '../busy-label';
 
 const regions = new Intl.DisplayNames(['en'], { type: 'region' });
 const countryName = (code: string) => {
@@ -194,12 +197,12 @@ export function ContestantForm(props: {
       </FormField>
 
       {errors.form && (
-        <p role="alert" className="text-sm text-destructive">
+        <motion.p {...APPEAR} role="alert" className="text-sm text-destructive">
           {errors.form}
-        </p>
+        </motion.p>
       )}
       <Button type="submit" data-testid="save-contestant" disabled={saving}>
-        {saving ? 'Saving…' : editing ? 'Save changes' : 'Add contestant'}
+        {saving ? <BusyLabel>Saving…</BusyLabel> : editing ? 'Save changes' : 'Add contestant'}
       </Button>
     </form>
   );
@@ -218,9 +221,16 @@ function FormField(props: {
       <Label htmlFor={id}>{label}</Label>
       {children}
       {error ? (
-        <p data-testid={`error-${id}`} role="alert" className="text-xs text-destructive">
+        // Keyed by the message, so a new error arrives the same way as the first.
+        <motion.p
+          key={error}
+          {...APPEAR}
+          data-testid={`error-${id}`}
+          role="alert"
+          className="text-xs text-destructive"
+        >
           {error}
-        </p>
+        </motion.p>
       ) : (
         hint && <p className="text-xs text-muted-foreground">{hint}</p>
       )}

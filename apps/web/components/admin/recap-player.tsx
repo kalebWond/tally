@@ -3,12 +3,14 @@
 import { Player } from '@remotion/player';
 import { DURATION_FRAMES, FPS, HEIGHT, Recap, type RecapData, WIDTH } from '@tally/recap-video';
 import { ArrowLeft, RefreshCw } from 'lucide-react';
+import { motion } from 'motion/react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useTransition } from 'react';
 import { Time } from '@/components/time';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { GENTLE } from '@/lib/motion';
 
 const n = new Intl.NumberFormat('en');
 
@@ -73,7 +75,14 @@ export function RecapPlayer({ data, loadedAt }: { data: RecapData; loadedAt: str
           from the Generator page, then come back.
         </p>
       ) : (
-        <div className="overflow-hidden rounded-xl border bg-black" data-testid="recap-player">
+        // Rises into place when the page loads (F31), like a card being set down.
+        <motion.div
+          className="overflow-hidden rounded-xl border bg-black"
+          data-testid="recap-player"
+          initial={{ opacity: 0, y: 16, scale: 0.98 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={GENTLE}
+        >
           <Player
             // A new export is a new video: remount so it restarts from the first frame.
             key={loadedAt}
@@ -88,7 +97,7 @@ export function RecapPlayer({ data, loadedAt }: { data: RecapData; loadedAt: str
             clickToPlay
             style={{ width: '100%', aspectRatio: `${WIDTH} / ${HEIGHT}` }}
           />
-        </div>
+        </motion.div>
       )}
 
       <p className="text-sm text-muted-foreground">

@@ -304,6 +304,15 @@ Verified with k6 against the ingest API; results published in the README.
 
 *Changed (F9):* implemented with Motion's `useSpring` (retarget keeps velocity); react-countup is not used. The spring is overdamped so counts never overshoot or run backwards, and the first snapshot shows instantly.
 
+*Added (F31):* a motion pass (plan F31) on the rules of the `emilkowalski/skills@apple-design` skill. Motion comes only from the data or the operator's hand:
+- a "+N" rising from a row as votes land
+- an overtaking row that lifts, glides and settles, while its rank rolls like an odometer
+- a LIVE dot beating at the vote rate
+- List ↔ Grid morphing each row into its card
+- a pinned translucent header
+
+All of it runs on shared spring presets (`apps/web/lib/motion.ts`), and reduced motion turns movement into fades.
+
 **Card grid (later phase)**
 Portrait, name, optional flag, live count, gradient from the contestant's two accent colours. Same data and component as the list; a layout flag switches arrangement.
 

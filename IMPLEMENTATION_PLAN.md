@@ -343,6 +343,17 @@ Build one feature per session. Each has a goal, a build list, and a check that d
 - **Admin pages:** a translucent sticky nav whose active underline slides between links; the filter chips share one sliding pill; a new contest slides in at the top, a deleted draft collapses and the rows below glide up, and a status change crossfades its badge (rows stay put, as in F30); sample contestants drop in with a 30 ms stagger; validation errors slide open under their field; saving shows progress in the button; dialogs and menus grow from their trigger, exit faster than they enter and reverse mid-flight when interrupted. The recap page's player rises in on load; the video itself only gets its spring constants aligned.
 - **Accessibility:** with reduced motion, counters jump, reorders crossfade and pulses stop; with reduced transparency the blurred bars are solid; with more contrast, borders strengthen.
 
+*Decided (F31):* built as planned, with these changes (DECISIONS, F31):
+- The leader's highlight is handed over by fading: in on the new leader as it glides up, out on the old one as it drops. It isn't one shared element, because Motion ends a shared element's hold early when its parent row is animating too, and the highlight jumped about 15 px.
+- The vote bars (relative to the leader) were built, then removed at the user's request: on the cards they read as progress bars.
+- The header pins only on screens at least 641 px wide and 700 px tall.
+- The operator pages moved into an `app/(operator)` route group, so one layout renders the nav and its highlight can slide from page to page.
+- Page notices open to their height instead of shoving the table down.
+- A row's parts are memoised, number formatters are cached and the LIVE dot is a Web Animation. The first version cost the board 12 points of main-thread time at the maximum rate. The final one had 0.2% of frames late, p99 16.8 ms.
+- A reshuffle replaces the sample rows at once, and leaving rows are inert while they fade.
+
+Verified: 54 of 54 functional checks and the 60 fps check in headless Chrome, and the F24–F30 checks rerun.
+
 **Done when:** Frame captures in headless Chrome show an overtake at 1,000 votes/s (the row lifts, glides and settles; the rank rolls; the leader highlight slides), List ↔ Grid morphing, a contest created and a draft deleted without any row jumping, and a closed contest desaturating. A Chrome performance trace of the board at the generator's maximum rate stays within the 60 fps frame budget. With `prefers-reduced-motion` the glides become crossfades and nothing pulses. The F24–F30 check scripts still pass.
 
 ---

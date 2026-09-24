@@ -2,9 +2,11 @@
 
 import type { Contestant } from '@tally/contracts';
 import { ExternalLink, Pencil, Plus, Sparkles } from 'lucide-react';
+import { AnimatePresence, LayoutGroup, motion } from 'motion/react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { PresenceRow } from '@/components/presence-row';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -24,6 +26,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { EXIT, EXPAND, GENTLE, SMOOTH } from '@/lib/motion';
 import { ContestOptions } from './contest-options';
 import { ContestantForm } from './contestant-form';
 import { SampleContestants } from './sample-contestants';
@@ -98,7 +101,7 @@ export function ContestantsAdmin(props: {
   }
 
   return (
-    <main className="mx-auto grid w-full max-w-6xl gap-6 px-4 py-8">
+    <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-8">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="text-sm tracking-widest text-muted-foreground uppercase">Tally · admin</p>
@@ -141,19 +144,23 @@ export function ContestantsAdmin(props: {
         </div>
       </header>
 
-      {notice && (
-        <p
-          role="status"
-          data-testid="notice"
-          className={`rounded-lg border px-4 py-3 text-sm ${
-            notice.tone === 'ok'
-              ? 'border-line bg-muted/40'
-              : 'border-destructive/40 bg-destructive/10'
-          }`}
-        >
-          {notice.text}
-        </p>
-      )}
+      <AnimatePresence>
+        {notice && (
+          <motion.div key="notice" {...EXPAND} className="overflow-hidden">
+            <p
+              role="status"
+              data-testid="notice"
+              className={`rounded-lg border px-4 py-3 text-sm ${
+                notice.tone === 'ok'
+                  ? 'border-line bg-muted/40'
+                  : 'border-destructive/40 bg-destructive/10'
+              }`}
+            >
+              {notice.text}
+            </p>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <div className="overflow-x-auto rounded-xl border bg-card">
         <Table>
@@ -184,70 +191,78 @@ export function ContestantsAdmin(props: {
                 </TableCell>
               </TableRow>
             )}
-            {contestants.map((c) => (
-              <TableRow
-                key={c.id}
-                data-code={c.code}
-                data-active={c.active}
-                className={c.active ? '' : 'opacity-55'}
-              >
-                <TableCell>
-                  <div className="size-9 overflow-hidden rounded-full border bg-muted">
-                    {c.imageUrl && (
-                      <Image src={c.imageUrl} alt="" width={36} height={36} unoptimized />
-                    )}
-                  </div>
-                </TableCell>
-                <TableCell className="font-mono font-semibold">{c.code}</TableCell>
-                <TableCell>
-                  {c.name}
-                  {!c.active && (
-                    <Badge variant="outline" className="ml-2">
-                      inactive
-                    </Badge>
-                  )}
-                </TableCell>
-                <TableCell className="text-muted-foreground">
-                  {c.countryCode
-                    ? `${regions.of(c.countryCode) ?? c.countryCode} (${c.countryCode})`
-                    : '—'}
-                </TableCell>
-                <TableCell>
-                  <span
-                    className="block h-4 w-14 rounded-full border"
-                    style={{
-                      background:
-                        c.accentFrom || c.accentTo
-                          ? `linear-gradient(90deg, ${c.accentFrom ?? c.accentTo}, ${c.accentTo ?? c.accentFrom})`
-                          : undefined,
-                    }}
-                  />
-                </TableCell>
-                <TableCell className="text-right tabular-nums">
-                  {c.votes.toLocaleString('en')}
-                </TableCell>
-                <TableCell>
-                  <Switch
-                    data-testid={`active-${c.code}`}
-                    checked={c.active}
-                    disabled={toggling === c.id}
-                    onCheckedChange={(on) => setActive(c, on)}
-                    aria-label={`${c.name} active`}
-                  />
-                </TableCell>
-                <TableCell>
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    data-testid={`edit-${c.code}`}
-                    onClick={() => setDialog(c)}
-                    aria-label={`Edit ${c.name}`}
+            <LayoutGroup>
+              <AnimatePresence initial={false}>
+                {contestants.map((c) => (
+                  <PresenceRow
+                    key={c.id}
+                    layout="position"
+                    transition={SMOOTH}
+                    initial={{ opacity: 0, y: -8 }}
+                    animate={{ opacity: c.active ? 1 : 0.55, y: 0, transition: GENTLE }}
+                    exit={{ opacity: 0, transition: EXIT }}
+                    data-code={c.code}
+                    data-active={c.active}
                   >
-                    <Pencil />
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))}
+                    <TableCell>
+                      <div className="size-9 overflow-hidden rounded-full border bg-muted">
+                        {c.imageUrl && (
+                          <Image src={c.imageUrl} alt="" width={36} height={36} unoptimized />
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell className="font-mono font-semibold">{c.code}</TableCell>
+                    <TableCell>
+                      {c.name}
+                      {!c.active && (
+                        <Badge variant="outline" className="ml-2">
+                          inactive
+                        </Badge>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {c.countryCode
+                        ? `${regions.of(c.countryCode) ?? c.countryCode} (${c.countryCode})`
+                        : '—'}
+                    </TableCell>
+                    <TableCell>
+                      <span
+                        className="block h-4 w-14 rounded-full border"
+                        style={{
+                          background:
+                            c.accentFrom || c.accentTo
+                              ? `linear-gradient(90deg, ${c.accentFrom ?? c.accentTo}, ${c.accentTo ?? c.accentFrom})`
+                              : undefined,
+                        }}
+                      />
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {c.votes.toLocaleString('en')}
+                    </TableCell>
+                    <TableCell>
+                      <Switch
+                        data-testid={`active-${c.code}`}
+                        checked={c.active}
+                        disabled={toggling === c.id}
+                        onCheckedChange={(on) => setActive(c, on)}
+                        aria-label={`${c.name} active`}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        data-testid={`edit-${c.code}`}
+                        onClick={() => setDialog(c)}
+                        aria-label={`Edit ${c.name}`}
+                      >
+                        <Pencil />
+                      </Button>
+                    </TableCell>
+                  </PresenceRow>
+                ))}
+              </AnimatePresence>
+            </LayoutGroup>
           </TableBody>
         </Table>
       </div>

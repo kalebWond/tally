@@ -1,7 +1,6 @@
 import type { Metadata } from 'next';
 import { connection } from 'next/server';
 import { z } from 'zod';
-import { AdminNav } from '@/components/admin/admin-nav';
 import { AnalyticsView } from '@/components/admin/analytics-view';
 import { latestContestId } from '@/lib/analytics';
 import { requireAdmin } from '@/lib/auth';
@@ -34,14 +33,11 @@ export default async function AnalyticsPage(props: PageProps<'/admin/analytics'>
   }
 
   return (
-    <>
-      <AdminNav current="/admin/analytics" />
-      <AnalyticsView
-        contests={contests}
-        contestId={contestId}
-        names={names}
-        labelsAvailable={labelsAvailable}
-      />
-    </>
+    <AnalyticsView
+      contests={contests}
+      contestId={contestId}
+      names={names}
+      labelsAvailable={labelsAvailable}
+    />
   );
 }

@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { Barlow, Barlow_Condensed } from 'next/font/google';
 import type { ReactNode } from 'react';
+import { MotionPreferences } from '@/components/motion-preferences';
 import './globals.css';
 
 const display = Barlow_Condensed({
@@ -18,7 +19,9 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" className={`${display.variable} ${body.variable}`}>
-      <body>{children}</body>
+      <body>
+        <MotionPreferences>{children}</MotionPreferences>
+      </body>
     </html>
   );
 }

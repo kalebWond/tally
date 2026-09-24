@@ -2,6 +2,7 @@
 
 import { avatarUrl, type Contestant, ErrorResponse } from '@tally/contracts';
 import { Shuffle, X } from 'lucide-react';
+import { AnimatePresence, LayoutGroup, motion } from 'motion/react';
 import Image from 'next/image';
 import { type FormEvent, useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -14,7 +15,10 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { APPEAR, EXIT, GENTLE, SMOOTH, STAGGER_S } from '@/lib/motion';
 import { type SampleContestant, sampleContestants } from '@/lib/sample-contestants';
+import { BusyLabel } from '../busy-label';
+import { PresenceTr } from '../presence-row';
 
 type Draft = SampleContestant & { key: number };
 type Field = keyof SampleContestant;
@@ -43,6 +47,8 @@ export function SampleContestants(props: {
     }).map((c) => ({ ...c, key: nextKey++ }));
 
   const [rows, setRows] = useState<Draft[]>([]);
+  /** Which draw is on screen: a new one replaces the list outright (see the table body). */
+  const [dealt, setDealt] = useState(0);
   /** Errors by row key and field, plus one for the whole batch. */
   const [errors, setErrors] = useState<Record<number, Partial<Record<Field, string>>>>({});
   const [formError, setFormError] = useState<string | null>(null);
@@ -54,6 +60,7 @@ export function SampleContestants(props: {
     setWasOpen(open);
     if (open) {
       setRows(draw());
+      setDealt((d) => d + 1);
       setErrors({});
       setFormError(null);
     }
@@ -127,15 +134,19 @@ export function SampleContestants(props: {
             </DialogDescription>
           </DialogHeader>
 
-          {formError && (
-            <p
-              role="alert"
-              data-testid="samples-error"
-              className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm"
-            >
-              {formError}
-            </p>
-          )}
+          <AnimatePresence>
+            {formError && (
+              <motion.p
+                key="error"
+                {...APPEAR}
+                role="alert"
+                data-testid="samples-error"
+                className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm"
+              >
+                {formError}
+              </motion.p>
+            )}
+          </AnimatePresence>
 
           <div className="max-h-[60vh] overflow-auto rounded-lg border">
             <table className="w-full min-w-[760px] text-sm">
@@ -149,114 +160,136 @@ export function SampleContestants(props: {
                   <th className="w-10 px-2 py-2" />
                 </tr>
               </thead>
-              <tbody>
-                {rows.map((r, i) => {
-                  const e = errors[r.key] ?? {};
-                  return (
-                    <tr key={r.key} data-sample={i} className="border-t align-top">
-                      <td className="px-3 py-2">
-                        <div
-                          className="size-9 overflow-hidden rounded-full border"
-                          style={{
-                            background: `linear-gradient(135deg, ${r.accentFrom}, ${r.accentTo})`,
+              {/* Keyed by the draw: a reshuffle swaps the whole set at once, rather than leaving
+                  the old rows fading out (and still clickable) under the new ones. */}
+              <tbody key={dealt}>
+                {/* Dealt in one after another, on opening and on every reshuffle; a removed
+                    row fades and the rest close up (F31). */}
+                <LayoutGroup>
+                  <AnimatePresence initial>
+                    {rows.map((r, i) => {
+                      const e = errors[r.key] ?? {};
+                      return (
+                        <PresenceTr
+                          key={r.key}
+                          layout="position"
+                          transition={SMOOTH}
+                          initial={{ opacity: 0, y: 8 }}
+                          animate={{
+                            opacity: 1,
+                            y: 0,
+                            transition: { ...GENTLE, delay: i * STAGGER_S },
                           }}
+                          exit={{ opacity: 0, transition: EXIT }}
+                          data-sample={i}
+                          className="border-t align-top"
                         >
-                          {r.name.trim() && (
-                            <Image
-                              src={avatarUrl(r.name.trim())}
-                              alt=""
-                              width={36}
-                              height={36}
-                              unoptimized
+                          <td className="px-3 py-2">
+                            <div
+                              className="size-9 overflow-hidden rounded-full border"
+                              style={{
+                                background: `linear-gradient(135deg, ${r.accentFrom}, ${r.accentTo})`,
+                              }}
+                            >
+                              {r.name.trim() && (
+                                <Image
+                                  src={avatarUrl(r.name.trim())}
+                                  alt=""
+                                  width={36}
+                                  height={36}
+                                  unoptimized
+                                />
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-2 py-2">
+                            <Input
+                              id={`sample-${r.key}-code`}
+                              aria-label={`Row ${i + 1} code`}
+                              aria-invalid={!!e.code}
+                              className="font-mono uppercase"
+                              value={r.code}
+                              maxLength={16}
+                              onChange={(ev) => edit(r.key, 'code', ev.target.value)}
                             />
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-2 py-2">
-                        <Input
-                          id={`sample-${r.key}-code`}
-                          aria-label={`Row ${i + 1} code`}
-                          aria-invalid={!!e.code}
-                          className="font-mono uppercase"
-                          value={r.code}
-                          maxLength={16}
-                          onChange={(ev) => edit(r.key, 'code', ev.target.value)}
-                        />
-                      </td>
-                      <td className="px-2 py-2">
-                        <Input
-                          id={`sample-${r.key}-name`}
-                          aria-label={`Row ${i + 1} name`}
-                          aria-invalid={!!e.name}
-                          value={r.name}
-                          maxLength={80}
-                          onChange={(ev) => edit(r.key, 'name', ev.target.value)}
-                        />
-                        {(e.code || e.name || e.countryCode || e.accentFrom || e.accentTo) && (
-                          <p
-                            role="alert"
-                            data-testid={`sample-error-${i}`}
-                            className="mt-1 text-xs text-destructive"
-                          >
-                            {[e.code, e.name, e.countryCode, e.accentFrom, e.accentTo]
-                              .filter(Boolean)
-                              .join(' ')}
-                          </p>
-                        )}
-                      </td>
-                      <td className="px-2 py-2">
-                        <Input
-                          id={`sample-${r.key}-country`}
-                          aria-label={`Row ${i + 1} country code`}
-                          aria-invalid={!!e.countryCode}
-                          className="w-16 font-mono uppercase"
-                          value={r.countryCode}
-                          maxLength={2}
-                          onChange={(ev) => edit(r.key, 'countryCode', ev.target.value)}
-                        />
-                        <span className="mt-1 block truncate text-xs text-muted-foreground">
-                          {safeRegion(r.countryCode)}
-                        </span>
-                      </td>
-                      <td className="px-2 py-2">
-                        <div className="flex gap-1">
-                          <input
-                            type="color"
-                            id={`sample-${r.key}-from`}
-                            aria-label={`Row ${i + 1} accent start`}
-                            className="h-9 w-11 cursor-pointer rounded border bg-transparent"
-                            value={r.accentFrom.toLowerCase()}
-                            onChange={(ev) =>
-                              edit(r.key, 'accentFrom', ev.target.value.toUpperCase())
-                            }
-                          />
-                          <input
-                            type="color"
-                            id={`sample-${r.key}-to`}
-                            aria-label={`Row ${i + 1} accent end`}
-                            className="h-9 w-11 cursor-pointer rounded border bg-transparent"
-                            value={r.accentTo.toLowerCase()}
-                            onChange={(ev) =>
-                              edit(r.key, 'accentTo', ev.target.value.toUpperCase())
-                            }
-                          />
-                        </div>
-                      </td>
-                      <td className="px-2 py-2">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-sm"
-                          aria-label={`Remove ${r.name || `row ${i + 1}`}`}
-                          data-testid={`remove-sample-${i}`}
-                          onClick={() => setRows((rs) => rs.filter((x) => x.key !== r.key))}
-                        >
-                          <X />
-                        </Button>
-                      </td>
-                    </tr>
-                  );
-                })}
+                          </td>
+                          <td className="px-2 py-2">
+                            <Input
+                              id={`sample-${r.key}-name`}
+                              aria-label={`Row ${i + 1} name`}
+                              aria-invalid={!!e.name}
+                              value={r.name}
+                              maxLength={80}
+                              onChange={(ev) => edit(r.key, 'name', ev.target.value)}
+                            />
+                            {(e.code || e.name || e.countryCode || e.accentFrom || e.accentTo) && (
+                              <motion.p
+                                {...APPEAR}
+                                role="alert"
+                                data-testid={`sample-error-${i}`}
+                                className="mt-1 text-xs text-destructive"
+                              >
+                                {[e.code, e.name, e.countryCode, e.accentFrom, e.accentTo]
+                                  .filter(Boolean)
+                                  .join(' ')}
+                              </motion.p>
+                            )}
+                          </td>
+                          <td className="px-2 py-2">
+                            <Input
+                              id={`sample-${r.key}-country`}
+                              aria-label={`Row ${i + 1} country code`}
+                              aria-invalid={!!e.countryCode}
+                              className="w-16 font-mono uppercase"
+                              value={r.countryCode}
+                              maxLength={2}
+                              onChange={(ev) => edit(r.key, 'countryCode', ev.target.value)}
+                            />
+                            <span className="mt-1 block truncate text-xs text-muted-foreground">
+                              {safeRegion(r.countryCode)}
+                            </span>
+                          </td>
+                          <td className="px-2 py-2">
+                            <div className="flex gap-1">
+                              <input
+                                type="color"
+                                id={`sample-${r.key}-from`}
+                                aria-label={`Row ${i + 1} accent start`}
+                                className="h-9 w-11 cursor-pointer rounded border bg-transparent"
+                                value={r.accentFrom.toLowerCase()}
+                                onChange={(ev) =>
+                                  edit(r.key, 'accentFrom', ev.target.value.toUpperCase())
+                                }
+                              />
+                              <input
+                                type="color"
+                                id={`sample-${r.key}-to`}
+                                aria-label={`Row ${i + 1} accent end`}
+                                className="h-9 w-11 cursor-pointer rounded border bg-transparent"
+                                value={r.accentTo.toLowerCase()}
+                                onChange={(ev) =>
+                                  edit(r.key, 'accentTo', ev.target.value.toUpperCase())
+                                }
+                              />
+                            </div>
+                          </td>
+                          <td className="px-2 py-2">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-sm"
+                              aria-label={`Remove ${r.name || `row ${i + 1}`}`}
+                              data-testid={`remove-sample-${i}`}
+                              onClick={() => setRows((rs) => rs.filter((x) => x.key !== r.key))}
+                            >
+                              <X />
+                            </Button>
+                          </td>
+                        </PresenceTr>
+                      );
+                    })}
+                  </AnimatePresence>
+                </LayoutGroup>
                 {rows.length === 0 && (
                   <tr>
                     <td colSpan={6} className="py-8 text-center text-muted-foreground">
@@ -276,6 +309,7 @@ export function SampleContestants(props: {
               disabled={saving}
               onClick={() => {
                 setRows(draw());
+                setDealt((d) => d + 1);
                 setErrors({});
                 setFormError(null);
               }}
@@ -292,9 +326,11 @@ export function SampleContestants(props: {
                 Cancel
               </Button>
               <Button type="submit" data-testid="add-samples" disabled={saving || !rows.length}>
-                {saving
-                  ? 'Adding…'
-                  : `Add ${rows.length} contestant${rows.length === 1 ? '' : 's'}`}
+                {saving ? (
+                  <BusyLabel>Adding…</BusyLabel>
+                ) : (
+                  `Add ${rows.length} contestant${rows.length === 1 ? '' : 's'}`
+                )}
               </Button>
             </div>
           </DialogFooter>

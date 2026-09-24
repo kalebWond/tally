@@ -1,9 +1,11 @@
 'use client';
 
 import type { GeneratorStatus, LiveBacklog } from '@tally/contracts';
-import { ExternalLink } from 'lucide-react';
+import { ExternalLink, Play, Square } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { ContestOptions } from '@/components/admin/contest-options';
+import { AnimatedNumber } from '@/components/animated-number';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -12,6 +14,8 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Slider } from '@/components/ui/slider';
 import { timeLeft } from '@/lib/backlog-text';
+import { drainShare } from '@/lib/liveliness';
+import { EXIT, EXPAND, GENTLE, SMOOTH, SNAPPY } from '@/lib/motion';
 import { RateChart } from './rate-chart';
 import { useGenerator } from './use-generator';
 
@@ -52,7 +56,7 @@ export function ControlPanel({
   const delivered = history.at(-1)?.actual ?? null;
 
   return (
-    <main className="mx-auto grid w-full max-w-6xl gap-6 px-4 py-8 lg:py-12">
+    <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-8 lg:py-12">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="text-sm tracking-widest text-muted-foreground uppercase">
@@ -74,21 +78,27 @@ export function ControlPanel({
         </div>
       </header>
 
-      {error && (
-        <p
-          role="alert"
-          data-testid="control-error"
-          className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm"
-        >
-          {error}
-        </p>
-      )}
-      {!reachable && (
-        <p className="rounded-lg border border-warn/40 bg-warn/10 px-4 py-3 text-sm">
-          The generator isn't answering. Start it with{' '}
-          <code>docker compose --profile app up -d</code>; this page keeps checking.
-        </p>
-      )}
+      <AnimatePresence>
+        {error && (
+          <motion.div key="error" {...EXPAND} className="overflow-hidden">
+            <p
+              role="alert"
+              data-testid="control-error"
+              className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm"
+            >
+              {error}
+            </p>
+          </motion.div>
+        )}
+        {!reachable && (
+          <motion.div key="unreachable" {...EXPAND} className="overflow-hidden">
+            <p className="rounded-lg border border-warn/40 bg-warn/10 px-4 py-3 text-sm">
+              The generator isn't answering. Start it with{' '}
+              <code>docker compose --profile app up -d</code>; this page keeps checking.
+            </p>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <div className="grid gap-6 lg:grid-cols-[380px_1fr]">
         <div className="grid content-start gap-6">
@@ -161,42 +171,62 @@ export function ControlPanel({
                 </Field>
               </div>
 
+              {/* Start becomes Stop (F31): one button that changes colour and word and makes
+                  room for "Set rate" beside it, so the control you just pressed is still under
+                  your pointer, now offering the way back. */}
               <div className="flex gap-3">
-                {running ? (
+                <AnimatePresence initial={false} mode="popLayout">
+                  {running && (
+                    <motion.div
+                      key="set-rate"
+                      className="flex-1"
+                      initial={{ opacity: 0, scale: 0.9 }}
+                      animate={{ opacity: 1, scale: 1, transition: GENTLE }}
+                      exit={{ opacity: 0, scale: 0.9, transition: EXIT }}
+                    >
+                      <Button
+                        data-testid="set-rate"
+                        className="w-full"
+                        disabled={busy !== null || rate === status?.baseRate}
+                        onClick={() => act('rate', { ratePerSec: rate })}
+                      >
+                        Set rate
+                      </Button>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+                <motion.div layout transition={SMOOTH} className="flex-1">
                   <Button
-                    data-testid="set-rate"
-                    className="flex-1"
-                    disabled={busy !== null || rate === status?.baseRate}
-                    onClick={() => act('rate', { ratePerSec: rate })}
-                  >
-                    Set rate
-                  </Button>
-                ) : (
-                  <Button
-                    data-testid="start"
-                    className="flex-1"
-                    disabled={busy !== null || !reachable || !contestId}
+                    data-testid={running ? 'stop' : 'start'}
+                    data-run-toggle
+                    variant={running ? 'destructive' : 'default'}
+                    className="w-full overflow-hidden"
+                    disabled={busy !== null || (!running && (!reachable || !contestId))}
                     onClick={() =>
-                      act('start', {
-                        contestId,
-                        ratePerSec: rate,
-                        invalidCodeRatio: invalidPct / 100,
-                        duplicateSenderRatio: duplicatePct / 100,
-                      })
+                      running
+                        ? act('stop')
+                        : act('start', {
+                            contestId,
+                            ratePerSec: rate,
+                            invalidCodeRatio: invalidPct / 100,
+                            duplicateSenderRatio: duplicatePct / 100,
+                          })
                     }
                   >
-                    Start
+                    <AnimatePresence initial={false} mode="popLayout">
+                      <motion.span
+                        key={running ? 'stop' : 'start'}
+                        className="inline-flex items-center gap-1.5"
+                        initial={{ opacity: 0, y: running ? 10 : -10 }}
+                        animate={{ opacity: 1, y: 0, transition: SNAPPY }}
+                        exit={{ opacity: 0, y: running ? -10 : 10, transition: EXIT }}
+                      >
+                        {running ? <Square /> : <Play />}
+                        {running ? 'Stop' : 'Start'}
+                      </motion.span>
+                    </AnimatePresence>
                   </Button>
-                )}
-                <Button
-                  data-testid="stop"
-                  variant="destructive"
-                  className="flex-1"
-                  disabled={busy !== null || !running}
-                  onClick={() => act('stop')}
-                >
-                  Stop
-                </Button>
+                </motion.div>
               </div>
             </CardContent>
           </Card>
@@ -274,6 +304,7 @@ export function ControlPanel({
               <CardDescription data-testid="backlog-note">{backlogNote(backlog)}</CardDescription>
             </CardHeader>
             <CardContent className="grid grid-cols-3 gap-3">
+              <DrainBar pending={backlog?.pending ?? 0} />
               <Stat name="pending" label="Waiting" value={backlog?.pending} />
               <Stat name="perSec" label="Counting" value={backlog?.perSec} unit="/s" />
               <Stat
@@ -381,13 +412,10 @@ function Stat(props: {
     >
       <div className="text-xs tracking-wide text-muted-foreground uppercase">{label}</div>
       <div
-        className={`font-heading text-2xl font-semibold tabular-nums ${alert && known && value > 0 ? 'text-destructive' : ''}`}
+        className={`font-heading text-2xl font-semibold tabular-nums transition-colors ${alert && known && value > 0 ? 'text-destructive' : ''}`}
       >
-        {text
-          ? text
-          : known
-            ? `${value.toLocaleString('en', { maximumFractionDigits: digits, minimumFractionDigits: digits })}${unit}`
-            : '—'}
+        {/* Figures tick toward each new reading like the results board's counters (F31). */}
+        {text ? text : known ? <AnimatedNumber value={value} digits={digits} unit={unit} /> : '—'}
       </div>
     </div>
   );
@@ -405,14 +433,49 @@ function StateBadge({ state, endsAt }: { state: string; endsAt: number | null })
   const left = endsAt ? Math.max(0, Math.ceil((endsAt - Date.now()) / 1000)) : null;
   return (
     <div className="flex items-center gap-2">
-      <Badge data-testid="state" className={`h-7 px-3 text-sm font-semibold uppercase ${tone}`}>
-        {state}
-      </Badge>
+      <AnimatePresence initial={false} mode="popLayout">
+        <motion.span
+          key={state}
+          className="inline-flex"
+          initial={{ opacity: 0, scale: 0.85 }}
+          animate={{ opacity: 1, scale: 1, transition: SNAPPY }}
+          exit={{ opacity: 0, scale: 0.85, transition: EXIT }}
+        >
+          <Badge data-testid="state" className={`h-7 px-3 text-sm font-semibold uppercase ${tone}`}>
+            {state}
+          </Badge>
+        </motion.span>
+      </AnimatePresence>
       {state === 'Burst' && left !== null && (
         <span data-testid="burst-countdown" className="text-sm tabular-nums text-muted-foreground">
           {left}s left
         </span>
       )}
+    </div>
+  );
+}
+
+/**
+ * The queue as a bar (F31): full at the most that has waited since it was last empty, draining
+ * to nothing as votes are counted, so "still counting" reads at a glance.
+ */
+function DrainBar({ pending }: { pending: number }) {
+  const [peak, setPeak] = useState(0);
+  const { share, peak: next } = drainShare(pending, peak);
+  if (next !== peak) setPeak(next);
+  return (
+    <div
+      className="col-span-3 h-1.5 overflow-hidden rounded-full bg-muted"
+      data-testid="backlog-bar"
+      data-share={share.toFixed(3)}
+      aria-hidden
+    >
+      <motion.div
+        className="h-full origin-left rounded-full bg-warn"
+        initial={false}
+        animate={{ scaleX: share }}
+        transition={SMOOTH}
+      />
     </div>
   );
 }

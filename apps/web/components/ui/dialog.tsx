@@ -2,12 +2,46 @@
 
 import { cn } from 'cn';
 import { XIcon } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
 import { Dialog as DialogPrimitive } from 'radix-ui';
-import type * as React from 'react';
+import * as React from 'react';
 import { Button } from '@/components/ui/button';
+import { EXIT, GENTLE } from '@/lib/motion';
 
-function Dialog({ ...props }: React.ComponentProps<typeof DialogPrimitive.Root>) {
-  return <DialogPrimitive.Root data-slot="dialog" {...props} />;
+/** Whether the enclosing dialog is open, for DialogContent's enter and exit (F31). */
+const DialogOpen = React.createContext(false);
+
+/**
+ * Where the last press landed, so a dialog can grow out of the button that opened it (F31).
+ * Recorded before any click handler runs; a dialog opened from the keyboard, with no recent
+ * press, grows from its own centre.
+ */
+let lastPress: { x: number; y: number; at: number } | null = null;
+if (typeof window !== 'undefined') {
+  window.addEventListener(
+    'pointerdown',
+    (e) => {
+      lastPress = { x: e.clientX, y: e.clientY, at: performance.now() };
+    },
+    { capture: true, passive: true },
+  );
+}
+
+/**
+ * The content box's transform-origin that puts the press point in place: the box is centred
+ * with translate(-50%, -50%), so the point sits at (press − 50vw + 50% of the box).
+ */
+function pressOrigin() {
+  if (!lastPress || performance.now() - lastPress.at > 1000) return '50% 50%';
+  return `calc(${lastPress.x}px - 50vw + 50%) calc(${lastPress.y}px - 50vh + 50%)`;
+}
+
+function Dialog({ open = false, ...props }: React.ComponentProps<typeof DialogPrimitive.Root>) {
+  return (
+    <DialogOpen.Provider value={open}>
+      <DialogPrimitive.Root data-slot="dialog" open={open} {...props} />
+    </DialogOpen.Provider>
+  );
 }
 
 function DialogTrigger({ ...props }: React.ComponentProps<typeof DialogPrimitive.Trigger>) {
@@ -27,47 +61,73 @@ function DialogOverlay({
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Overlay>) {
   return (
-    <DialogPrimitive.Overlay
-      data-slot="dialog-overlay"
-      className={cn(
-        'fixed inset-0 isolate z-50 bg-black/10 duration-100 supports-backdrop-filter:backdrop-blur-xs data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0',
-        className,
-      )}
-      {...props}
-    />
+    <DialogPrimitive.Overlay asChild forceMount {...props}>
+      <motion.div
+        data-slot="dialog-overlay"
+        className={cn(
+          'fixed inset-0 isolate z-50 bg-black/10 supports-backdrop-filter:backdrop-blur-xs',
+          className,
+        )}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1, transition: GENTLE }}
+        exit={{ opacity: 0, transition: EXIT }}
+      />
+    </DialogPrimitive.Overlay>
   );
 }
 
+/**
+ * The dialog box (F31): grows out of the button that opened it and shrinks back toward it,
+ * quicker out than in. Enter and exit are springs on the same element, so closing and
+ * reopening mid-flight reverses from where it is instead of starting over.
+ */
 function DialogContent({
   className,
   children,
   showCloseButton = true,
   ...props
-}: React.ComponentProps<typeof DialogPrimitive.Content> & {
+}: Omit<React.ComponentProps<typeof DialogPrimitive.Content>, 'forceMount' | 'asChild'> & {
   showCloseButton?: boolean;
 }) {
+  const open = React.useContext(DialogOpen);
+  // Taken when it opens, and kept while it closes: it leaves the way it came.
+  const [wasOpen, setWasOpen] = React.useState(false);
+  const [origin, setOrigin] = React.useState('50% 50%');
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) setOrigin(pressOrigin());
+  }
   return (
-    <DialogPortal>
-      <DialogOverlay />
-      <DialogPrimitive.Content
-        data-slot="dialog-content"
-        className={cn(
-          'fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl bg-popover p-4 text-sm text-popover-foreground ring-1 ring-foreground/10 duration-100 outline-none sm:max-w-sm data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95',
-          className,
-        )}
-        {...props}
-      >
-        {children}
-        {showCloseButton && (
-          <DialogPrimitive.Close data-slot="dialog-close" asChild>
-            <Button variant="ghost" className="absolute top-2 right-2" size="icon-sm">
-              <XIcon />
-              <span className="sr-only">Close</span>
-            </Button>
-          </DialogPrimitive.Close>
-        )}
-      </DialogPrimitive.Content>
-    </DialogPortal>
+    <AnimatePresence>
+      {open && (
+        <DialogPortal forceMount key="dialog">
+          <DialogOverlay />
+          <DialogPrimitive.Content asChild forceMount {...props}>
+            <motion.div
+              data-slot="dialog-content"
+              className={cn(
+                'fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl bg-popover p-4 text-sm text-popover-foreground ring-1 ring-foreground/10 outline-none sm:max-w-sm',
+                className,
+              )}
+              style={{ transformOrigin: origin }}
+              initial={{ opacity: 0, scale: 0.94 }}
+              animate={{ opacity: 1, scale: 1, transition: GENTLE }}
+              exit={{ opacity: 0, scale: 0.94, transition: EXIT }}
+            >
+              {children}
+              {showCloseButton && (
+                <DialogPrimitive.Close data-slot="dialog-close" asChild>
+                  <Button variant="ghost" className="absolute top-2 right-2" size="icon-sm">
+                    <XIcon />
+                    <span className="sr-only">Close</span>
+                  </Button>
+                </DialogPrimitive.Close>
+              )}
+            </motion.div>
+          </DialogPrimitive.Content>
+        </DialogPortal>
+      )}
+    </AnimatePresence>
   );
 }
 

@@ -1,14 +1,16 @@
 'use client';
 
 import type { ContestStatus } from '@tally/contracts';
-import { MotionConfig } from 'motion/react';
+import { AnimatePresence, motion } from 'motion/react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { backlogLine } from '@/lib/backlog-text';
+import { backlogParts } from '@/lib/backlog-text';
+import { EXIT, GENTLE, SNAPPY } from '@/lib/motion';
 import { type Movement, movements } from '@/lib/movement';
 import { type Entrant, rank, titleSize, unknownIds } from '@/lib/standings';
 import { AnimatedNumber } from './animated-number';
 import { ContestantRow, type Layout } from './contestant-row';
+import { LiveDot } from './live-dot';
 import { type ConnectionState, useLiveTotals } from './use-live-totals';
 import { VotesPerMinute } from './votes-per-minute';
 
@@ -74,7 +76,7 @@ function StaleNote({
 
 /** How often, at most, to re-fetch contestant details when an unknown id shows up. */
 const REFRESH_COOLDOWN_MS = 5000;
-/** How long a row keeps its overtake treatment (raised above the pack, glowing edge). */
+/** How long a row keeps its overtake treatment (lifted above the pack, glowing edge). */
 const OVERTAKE_MS = 800;
 
 /**
@@ -117,6 +119,36 @@ function useMovements(orderKey: string) {
   return marks;
 }
 
+/**
+ * Whether the header is pinned over the list (F31): it sticks on screens with room for it, and
+ * only then turns into a translucent bar with a soft edge where the rows pass under it.
+ */
+function useStuck() {
+  const ref = useRef<HTMLElement>(null);
+  const [stuck, setStuck] = useState(false);
+  useEffect(() => {
+    let frame = 0;
+    const measure = () => {
+      frame = 0;
+      const el = ref.current;
+      if (!el) return;
+      setStuck(getComputedStyle(el).position === 'sticky' && el.getBoundingClientRect().top <= 0.5);
+    };
+    const onScroll = () => {
+      if (!frame) frame = requestAnimationFrame(measure);
+    };
+    measure();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onScroll);
+    };
+  }, []);
+  return [ref, stuck] as const;
+}
+
 export function LiveStandings({ contest, entrants, gatewayUrl, initialLayout }: Props) {
   const [layout, setLayout] = useState<Layout>(initialLayout);
   // Kept in the URL without a navigation: no server round trip, and the live socket stays open.
@@ -130,7 +162,8 @@ export function LiveStandings({ contest, entrants, gatewayUrl, initialLayout }: 
   const { totals, totalVotes, status, minutes, minutesTo, backlog, connection, synced, retryAt } =
     useLiveTotals(gatewayUrl, contest.id);
   // Votes still in the queue (F29). Shown only while the connection is live: stale numbers hide.
-  const counting = connection === 'live' ? backlogLine(backlog) : null;
+  const counting = connection === 'live' ? backlogParts(backlog) : null;
+  const [headRef, stuck] = useStuck();
   // The gateway's status (F16) wins, so a close shows without a reload; it is null when Redis
   // doesn't know, and then the status this page was rendered with stands.
   const contestStatus = status ?? contest.status;
@@ -158,85 +191,98 @@ export function LiveStandings({ contest, entrants, gatewayUrl, initialLayout }: 
   }, [entrants, totals, router]);
 
   return (
-    // Reduced-motion users get instant reorders and counters.
-    <MotionConfig reducedMotion="user">
-      <main className="board" data-stale={stale || undefined} data-contest={contestStatus}>
-        <header className="board-head">
-          <div className="board-title">
-            <span className="board-status" data-state={pill}>
-              {STATUS_LABEL[pill]}
-            </span>
-            <h1 data-size={titleSize(contest.name)} title={contest.name}>
-              {contest.name}
-            </h1>
-          </div>
-          <div className="board-side">
-            <fieldset className="board-layout">
-              <legend className="sr-only">Layout</legend>
-              {(['list', 'grid'] as const).map((l) => (
-                <button
-                  key={l}
-                  type="button"
-                  aria-pressed={layout === l}
-                  data-testid={`layout-${l}`}
-                  onClick={() => switchLayout(l)}
-                >
-                  {l === 'list' ? 'List' : 'Grid'}
-                </button>
-              ))}
-            </fieldset>
-            <div className="board-count">
-              {synced ? (
-                <AnimatedNumber
-                  className="board-count-value"
-                  value={totalVotes}
-                  data-testid="total-votes"
-                />
-              ) : (
-                <span className="board-count-value">–</span>
-              )}
-              <span className="board-count-label">votes</span>
+    // Reduced-motion users get instant reorders and counters (MotionPreferences, root layout).
+    <main className="board" data-stale={stale || undefined} data-contest={contestStatus}>
+      <header ref={headRef} className="board-head" data-stuck={stuck || undefined}>
+        <div className="board-title">
+          <span className="board-status" data-state={pill}>
+            <LiveDot beating={pill === 'live'} totalVotes={totalVotes} synced={synced} />
+            {STATUS_LABEL[pill]}
+          </span>
+          <h1 data-size={titleSize(contest.name)} title={contest.name}>
+            {contest.name}
+          </h1>
+        </div>
+        <div className="board-side">
+          <fieldset className="board-layout">
+            <legend className="sr-only">Layout</legend>
+            {(['list', 'grid'] as const).map((l) => (
+              <button
+                key={l}
+                type="button"
+                aria-pressed={layout === l}
+                data-testid={`layout-${l}`}
+                onClick={() => switchLayout(l)}
+              >
+                {layout === l && (
+                  <motion.span
+                    layoutId="layout-pill"
+                    className="board-layout-pill"
+                    transition={SNAPPY}
+                  />
+                )}
+                {l === 'list' ? 'List' : 'Grid'}
+              </button>
+            ))}
+          </fieldset>
+          <div className="board-count">
+            {synced ? (
+              <AnimatedNumber
+                className="board-count-value"
+                value={totalVotes}
+                data-testid="total-votes"
+              />
+            ) : (
+              <span className="board-count-value">–</span>
+            )}
+            <span className="board-count-label">votes</span>
+            <AnimatePresence>
               {counting && (
-                <span
+                <motion.span
                   className="board-backlog"
                   data-testid="backlog"
                   title="Votes accepted but not yet counted, across all live contests."
+                  initial={{ opacity: 0, y: -4 }}
+                  animate={{ opacity: 1, y: 0, transition: GENTLE }}
+                  exit={{ opacity: 0, y: -4, transition: EXIT }}
                 >
-                  {counting}
-                </span>
+                  Counting <AnimatedNumber value={counting.pending} /> queued {counting.noun}
+                  {counting.left && ` · ${counting.left}`}
+                </motion.span>
               )}
-            </div>
+            </AnimatePresence>
           </div>
-        </header>
+        </div>
+      </header>
 
-        {stale && <StaleNote connection={connection} retryAt={retryAt} />}
+      {stale && <StaleNote connection={connection} retryAt={retryAt} />}
 
-        <ol className="board-rows" data-layout={layout} aria-label="Standings">
-          {standings.map((s, i) => (
-            <ContestantRow
-              key={s.id}
-              standing={s}
-              layout={layout}
-              synced={synced}
-              leader={i === 0 && s.total > 0}
-              movement={moving.get(s.id)?.dir}
-            />
-          ))}
-        </ol>
-
-        {synced && minutesTo !== null && (
-          <VotesPerMinute
-            minutes={minutes}
-            minutesTo={minutesTo}
-            opensAt={contest.opensAt ? Date.parse(contest.opensAt) : null}
-            live={contestStatus === 'open'}
+      <ol className="board-rows" data-layout={layout} aria-label="Standings">
+        {standings.map((s, i) => (
+          <ContestantRow
+            key={s.id}
+            standing={s}
+            layout={layout}
+            index={i}
+            synced={synced}
+            leader={i === 0 && s.total > 0}
+            movement={moving.get(s.id)?.dir}
           />
-        )}
+        ))}
+      </ol>
 
-        <footer className="board-foot" data-testid="board-foot">
-          {FOOTER[contestStatus]}
-        </footer>
-      </main>
-    </MotionConfig>
+      {synced && minutesTo !== null && (
+        <VotesPerMinute
+          minutes={minutes}
+          minutesTo={minutesTo}
+          opensAt={contest.opensAt ? Date.parse(contest.opensAt) : null}
+          live={contestStatus === 'open'}
+        />
+      )}
+
+      <footer className="board-foot" data-testid="board-foot">
+        {FOOTER[contestStatus]}
+      </footer>
+    </main>
   );
 }

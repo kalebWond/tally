@@ -1,6 +1,5 @@
 import type { Metadata } from 'next';
 import { connection } from 'next/server';
-import { AdminNav } from '@/components/admin/admin-nav';
 import { ContestsAdmin } from '@/components/admin/contests-admin';
 import { requireAdmin } from '@/lib/auth';
 import { getActiveContestantCounts, getContests } from '@/lib/contests';
@@ -20,13 +19,10 @@ export default async function ContestsPage(props: PageProps<'/admin/contests'>) 
   const initialFilter =
     asked === 'open' || asked === 'draft' || asked === 'closed' ? asked : ('all' as const);
   return (
-    <>
-      <AdminNav current="/admin/contests" />
-      <ContestsAdmin
-        contests={contests}
-        contestantCounts={contestantCounts}
-        initialFilter={initialFilter}
-      />
-    </>
+    <ContestsAdmin
+      contests={contests}
+      contestantCounts={contestantCounts}
+      initialFilter={initialFilter}
+    />
   );
 }

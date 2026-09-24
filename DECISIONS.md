@@ -21,6 +21,14 @@ Where the build departs from `SPEC.md` or `IMPLEMENTATION_PLAN.md`, or pins down
 | Counting backlog on the panel (plan F29) | the generator status handler adds `backlog` | a separate `GET /api/generator/backlog`, polled with `/status`: `GeneratorStatus` is a contract the Go generator mirrors, so it stays the generator's own | F29 |
 | Feature list (plan), third time | F30 deployment, F31 README, optional F32–F34 Kubernetes | new F30 UI polish; deployment is now F31, README F32, Kubernetes F33–F35. Earlier entries that mention deployment were updated to F31 | after F29 |
 | Feature list (plan), fourth time | F31 deployment, F32 README, optional F33–F35 Kubernetes | new F31 lively UI; deployment is now F32, README F33, Kubernetes F34–F36. Earlier entries that mention deployment were updated to F32 | after F30 |
+| Leader highlight (plan F31) | slides between rows as one shared element | handed over by fading: in on the new leader as it glides up, out on the old one as it drops. A shared element's hold on first place ended early when its row was also animating (a 15 px jump) | F31 |
+| Bars (plan F31) | "each bar's width springs to its new share" | none: built as votes relative to the leader, then removed after F31 at the user's request (on the cards they read as progress bars) | F31 |
+| "+N" bursts (plan F31) | at most once every ~600 ms per row | every 800 ms: at 600 ms a busy row's "+N"s overlapped | F31 |
+| Pinned header (plan F31) | the results header is pinned | pinned only on screens at least 641 px wide and 700 px tall; on phones it would take a third of the screen | F31 |
+| Rate display (plan F31) | "the shown rate follows the slider on a spring" | the panel's figures (target, delivered, counters, latencies) spring toward each reading; the number beside the slider stays exact, since it is what gets sent | F31 |
+| New contest (plan F31) | "a new contest slides in at the top" | creating a contest opens its contestants page (F26), so rows slide in wherever they arrive while a list is open (added contestants, a refreshed list); notices open to their height so nothing below jumps | F31 |
+| Layout (CLAUDE.md) | `app/admin`, `app/control`, each with a layout for local times | both inside `app/(operator)` (a route group: URLs unchanged), whose one layout renders the times provider and the nav | F31 |
+| Recap video (plan F31) | "only its spring constants aligned" | the winner card's pop is critically damped (it bounced) | F31 |
 | Voter hash (SPEC §5) | `SHA-256` of sender + salt | `HMAC-SHA256`, salt as the key, sender trimmed first | F3 |
 | Idempotency key (SPEC §6, plan F3) | ingest generates one (a UUID) | client `Idempotency-Key` header is honoured; ingest generates a UUID only when absent. Keys are 1–128 visible ASCII, not necessarily UUIDs | F3 |
 | `votes` constraints (SPEC §5) | FK only on `contestants.contest_id` | FKs also on `votes.contest_id`, `votes.contestant_id`, `vote_totals`, `vote_buckets` (no cascades). Contestants with votes can't be deleted, only deactivated | F2 |
@@ -833,4 +841,64 @@ Headless Chrome with its time zone set to `Africa/Addis_Ababa`, signed in, start
 **Why:** the user wants the app to feel lively, and asked what a redesign guided by the `emilkowalski/skills@apple-design` skill would look like, without copying Apple's look.
 **Decided:** use the skill for its motion rules only: critically damped springs, motion that is interruptible and starts from where it is, feedback on pointer-down, translucent materials for floating chrome, type details, and respect for reduced motion and transparency. Tally keeps its scoreboard identity. Every animation comes from the data (votes arriving, an overtake, the backlog draining) or the operator's action, and runs on shared presets in `lib/motion.ts`, so the whole app moves alike. The existing rules still hold: counters retarget, reorders go through the layout system, and list and grid are one component (which gives the List ↔ Grid morph for free).
 **Alternatives:** a visual restyle modelled on Apple (system font, light theme; the user said they don't want to mimic Apple); `dickwu/apple-design-skill` as well (a Human Interface Guidelines reference for review, about look more than liveliness); ad-hoc animations per component (inconsistent timing, and the kind of per-update animation that stutters).
+
+## F31 — Lively UI: what building it turned up
+**Built as planned in outline:** shared presets in `lib/motion.ts`; the board's bursts, bars, lift, rank roll, beat, morph, pinned header and cooling on close; the panel's morphing Start/Stop, ticking figures and drain bar; sliding pills, dialogs from their trigger, dealt samples, animated errors; reduced motion app-wide. The skill is installed in `.claude/skills/apple-design` (`skills-lock.json` pins it). The counter spring moved to the `SMOOTH` response (0.53 s → 0.4 s, still overdamped; the F9 tests pass).
+- **A shared element can't hold still inside a moving parent.** The leader highlight was one element (`layoutId`), meant to stay in first place while the new leader slid into it.
+  - Unmounted directly, Motion never measured the old one, so the new one started from its own row: a full-row jump.
+  - Leaving through `AnimatePresence` fixed that. But the new one's hold then ended when its own animation settled, before its row's did, and it dropped about 15 px.
+  - Handing over by fading keeps the highlight on its row, so nothing can jump.
+- **`reducedMotion="user"` jumps transforms rather than skipping them.** The overtaking row still lifted, instantly. Code that animates a transform as decoration checks `useReducedMotion()` itself.
+- **Rows that leave need a `LayoutGroup`** for the rows below to glide into the gap. Otherwise the siblings only measure when they next re-render, so they jumped.
+- **Performance, measured against the pre-F31 board** (built from the last commit and served alongside, same load: the generator at its 20,000/s maximum, which the stack delivers at 3,500–6,800/s on this laptop, depending on what else is running). The first version cost too much. After three fixes the board is back within budget:
+  - **Where it started:** the main thread was 40% busy against 28%, and 3.3% of frames were late against 1.1%.
+  - **Fix 1, memoising the row parts and moving the bars to a CSS transition.** Each row re-rendered all its new animated parts four times a second though only the score changes, and the ten bars ran JavaScript springs every frame. After the fix, script time matched the old board.
+  - **Fix 2, caching number formatters.** Giving `AnimatedNumber` a decimals option made it call `toLocaleString` with options on every frame for every counter. With options, that call builds a new `Intl.NumberFormat` each time, about 660 a second; the old plain `toLocaleString('en')` is cached.
+  - **Fix 3, moving the LIVE dot to a Web Animation.** Its speed is set through `updatePlaybackRate`, which keeps the phase. It runs on the compositor, not in a script every frame.
+  - **Final measurement:** 0.2% of frames late over 24 s, p95 and p99 at 16.7–16.8 ms, no long tasks.
+  - **Why the figures moved so much:** late frames here follow machine load, not the board. A blank page under the same load drops nothing, and the board's late frames come in bursts while the stack ramps up. The consumer also rebuilds Redis from the whole vote log at every start (7.2 million votes by the end, most of them from these checks), so a check that restarts it slows everything for minutes. The check therefore measures first, 15 s after the generator starts.
+- **A reshuffle left the old draw clickable.** Its rows faded out under the new ones for 150 ms, keeping their inputs and "remove" buttons, so a quick click (the F27 check's) landed on a row that no longer existed. Each draw now replaces the table body at once, and the new rows still deal in. Rows leaving any table are inert and hidden from assistive tech while they fade (`PresenceRow`).
+- **A notice pushed the page down all at once.** A negative margin can't cancel a grid gap: a grid track doesn't shrink below zero. The page columns became flex columns, so notices open to their height. `scrollbar-gutter: stable` stops the nav shifting 8 px between a page that scrolls and one that doesn't.
+- **Not F31, found while checking:** the first sign-in after the web server boots logs React's "Connection closed" (#412) as the login page hands over. Next is warming up; a warm server logs nothing. Check browsers now start on a fresh profile: reused ones carried stale sessions.
+- **The nav needed one layout.** Each page rendered its own nav, so a page change drew a new bar and the highlight couldn't travel. The operator pages now sit in an `app/(operator)` route group whose layout renders the nav once. Its highlight moves on click, before the next page arrives, and follows the address otherwise. The proxy still turns signed-out requests away before any layout renders.
+- **Dialogs grow from the press point.** A capture-phase `pointerdown` listener records it, and the box's `transform-origin` puts that point in place (the box is centred with `translate(-50%, -50%)`). Enter and exit are springs on one element under `AnimatePresence`, so closing and reopening mid-flight reverses instead of stacking a second dialog.
+- **Kept the F30 check working:** the filter pill comes after the chip's count, which that check reads from the first `<span>`.
+
+## F31 — How the done-when was verified
+The check ran in headless Chrome at 1,400 px against the `app` stack, with Tally Showcase opened for it and closed again afterwards. It recorded every animation frame through `requestAnimationFrame`. On the final build, 54 of 54 functional checks passed, then the performance check on its own.
+- **Overtake at 1,000 votes/s:**
+  - C6 glided past C7 through 24 frames between the two slots at 60 fps.
+  - It lifted to scale 1.020 and settled at 1.000.
+  - Its shadow and edge rose to full and faded to 0.
+  - Its rank rolled (two numbers on screen mid-roll) to #7, and it ended exactly in its new slot.
+  - When C4 took the lead, the highlight faded in on C4 and out on C5 during the glide.
+  - There were "+N" bursts on all 10 rows, at most one per 0.8 s each, and bars within 0.04 of votes ÷ leader.
+  - The LIVE dot beat every 2.4 s when quiet and every 1.2 s at 1,000/s.
+- **List ↔ Grid:** a row went from 948 px to a 228 px card through 29 frames between, and its name held 1.05 × its font size throughout (no stretched text).
+- **A contest created, and a draft deleted, without a row jumping:**
+  - The dialog grew from the New contest button: its first frame was at scale 0.94, 30 px right of and 23 px above its resting centre. Closing and reopening it mid-flight left one dialog, fully open.
+  - A duplicate name's error faded in, and the draft was created.
+  - Seven samples were dealt in one after another, and so was a reshuffle. Removing one let the rows below glide up 35 px.
+  - Deleting the draft let the next row glide up 45 px, its largest single step 6.3 px. The notice opened from 0 px on its first frame.
+- **Closing the contest:** the other rows cooled to `saturate(0.45)` through intermediate frames, the winner kept its colour, and the dot stopped.
+- **Panel and nav:**
+  - Start scaled to 0.97 on press; dragging off before letting go sent nothing.
+  - Start became Stop (the same element), with Set rate beside it, and back.
+  - The figures ticked, and the queue bar filled and then drained through 41 part-full frames.
+  - The nav stayed mounted across pages, its highlight slid through 16 frames, and it didn't shift sideways.
+- **Reduced motion** (a second browser): the dot was still, "+N" faded in place, and an overtaking row jumped with no in-between frames and faded in (opacity 0.30 → 1). A dialog faded in at scale 1.
+- **No console errors** in either browser.
+- **60 fps at the maximum rate:** the generator was set to 20,000/s and the stack delivered 5,640/s. In a fresh browser over 24 s: 1,441 frames, p50/p95/p99 16.7/16.7/16.8 ms, 3 late (0.2%), no long tasks.
+- **Earlier checks, rerun:**
+  - F24 grid passed. Its temporary-contest overtake passed on the first run and wasn't repeated, because its unique name now exists.
+  - F26 contests passed, and a short contests-page check passed after the last change.
+  - F27 samples passed after the reshuffle fix. F29 backlog passed.
+  - F30 polish passed with its copy adjusted to what F31 changed deliberately: the header is full-bleed, so the count is measured against its content box, and rows fading out after a filter change are skipped. Two F30 assumptions were fixed too: an "h ago" time can't change within a minute, and a regex that could never match was masked while there were no dead letters.
+  - F28 recap passed except its "no votes" case, whose demo contest, "Tally Finals", is no longer in the database.
+- `pnpm lint`, `pnpm typecheck`, `pnpm test` (225 tests) and `pnpm check:health` (10 of 10).
+
+## F31 — the vote bars were dropped
+**Why:** the user didn't like them: along the bottom of each grid card they read as progress bars, as if something were loading.
+**Decided:** removed from the rows and the cards (one element serves both, so both go). The "+N" bursts, the lift and the rank roll still carry the live feel.
+**Alternatives:** keeping them in the list only (the user asked for them gone; the list reads the same without them); a subtler bar (still a bar).
 

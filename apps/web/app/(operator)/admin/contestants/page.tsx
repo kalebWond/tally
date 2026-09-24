@@ -1,7 +1,6 @@
 import type { Metadata } from 'next';
 import { connection } from 'next/server';
 import { z } from 'zod';
-import { AdminNav } from '@/components/admin/admin-nav';
 import { ContestantsAdmin } from '@/components/admin/contestants-admin';
 import { listContestants } from '@/lib/admin-contestants';
 import { requireAdmin } from '@/lib/auth';
@@ -21,10 +20,5 @@ export default async function ContestantsPage(props: PageProps<'/admin/contestan
       : await getCurrentContestId();
   const contestants = contestId ? await listContestants(contestId) : [];
 
-  return (
-    <>
-      <AdminNav current="/admin/contestants" />
-      <ContestantsAdmin contests={contests} contestId={contestId} contestants={contestants} />
-    </>
-  );
+  return <ContestantsAdmin contests={contests} contestId={contestId} contestants={contestants} />;
 }

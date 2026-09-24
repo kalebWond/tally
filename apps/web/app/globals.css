@@ -36,6 +36,41 @@
   --chart-1: #4cc2ff;
   --chart-2: var(--ink-dim);
   --radius: 0.625rem;
+
+  /* Motion (F31): a critically damped spring as a CSS curve, for transitions CSS runs itself.
+     Same shape as lib/motion.ts; the durations match its SNAPPY and SMOOTH presets. */
+  --ease-spring: linear(
+    0,
+    0.035,
+    0.116,
+    0.218,
+    0.325,
+    0.428,
+    0.522,
+    0.605,
+    0.677,
+    0.737,
+    0.788,
+    0.83,
+    0.864,
+    0.892,
+    0.914,
+    0.932,
+    0.947,
+    0.958,
+    0.967,
+    0.974,
+    0.98,
+    0.984,
+    0.988,
+    0.991,
+    1
+  );
+  --dur-snappy: 280ms;
+  --dur-smooth: 390ms;
+  /* Translucent material for chrome that floats over content (the pinned header, the nav). */
+  --glass: color-mix(in srgb, var(--ground) 72%, transparent);
+  --glass-blur: blur(20px) saturate(180%);
 }
 
 @theme inline {
@@ -77,6 +112,12 @@
   }
 }
 
+/* Room for a scrollbar is always kept, so moving between a page that scrolls and one that
+   doesn't never shifts the layout sideways (F31). */
+html {
+  scrollbar-gutter: stable;
+}
+
 body {
   margin: 0;
   min-height: 100dvh;
@@ -104,6 +145,49 @@ body {
   gap: 16px 32px;
   padding-bottom: 20px;
   border-bottom: 1px solid var(--line);
+  transition: border-color var(--dur-smooth) ease;
+}
+/* Pinned (F31) where the screen has room: the rows scroll under a translucent bar, and a soft
+   edge replaces the divider only while something is actually passing beneath it. */
+@media (min-width: 641px) and (min-height: 700px) {
+  .board-head {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    /* Full-bleed to the board's gutters, and a little above, without moving anything. */
+    margin: -12px -16px 0;
+    padding: 12px 16px 20px;
+  }
+  .board-head::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background: var(--glass);
+    -webkit-backdrop-filter: var(--glass-blur);
+    backdrop-filter: var(--glass-blur);
+    opacity: 0;
+    transition: opacity var(--dur-smooth) ease;
+  }
+  .board-head::after {
+    content: "";
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    height: 18px;
+    background: linear-gradient(var(--glass), transparent);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--dur-smooth) ease;
+  }
+  .board-head[data-stuck] {
+    border-bottom-color: transparent;
+  }
+  .board-head[data-stuck]::before,
+  .board-head[data-stuck]::after {
+    opacity: 1;
+  }
 }
 .board-title {
   display: grid;
@@ -148,33 +232,39 @@ body {
   text-transform: uppercase;
   color: var(--ink-dim);
 }
-.board-status::before {
-  content: "";
+.board-status-dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
   background: var(--ink-dim);
+  transition: background-color var(--dur-smooth) ease;
 }
 .board-status[data-state="live"] {
   color: var(--ink);
   border-color: color-mix(in srgb, var(--live) 50%, var(--line));
 }
-.board-status[data-state="live"]::before {
-  background: var(--live);
-  animation: pulse 1.6s ease-in-out infinite;
+.board-status {
+  transition:
+    color var(--dur-smooth) ease,
+    background-color var(--dur-smooth) ease,
+    border-color var(--dur-smooth) ease;
 }
-.board-status[data-state="connecting"]::before {
+/* Live: the dot's beat is set by the vote rate (components/live-dot.tsx). */
+.board-status[data-state="live"] .board-status-dot {
+  background: var(--live);
+}
+.board-status[data-state="connecting"] .board-status-dot {
   background: var(--warn);
 }
 .board-status[data-state="reconnecting"] {
   color: var(--ink);
   border-color: color-mix(in srgb, var(--warn) 50%, var(--line));
 }
-.board-status[data-state="reconnecting"]::before {
+.board-status[data-state="reconnecting"] .board-status-dot {
   background: var(--warn);
   animation: pulse 0.9s ease-in-out infinite;
 }
-.board-status[data-state="unavailable"]::before {
+.board-status[data-state="unavailable"] .board-status-dot {
   background: var(--live);
 }
 /* Contest closed (F16): a settled, solid mark, no pulse. */
@@ -183,11 +273,12 @@ body {
   background: var(--ink);
   border-color: var(--ink);
 }
-.board-status[data-state="final"]::before {
+.board-status[data-state="final"] .board-status-dot {
   background: var(--ground);
 }
 
 .board-count {
+  position: relative;
   display: grid;
   justify-items: end;
 }
@@ -205,12 +296,17 @@ body {
   text-transform: uppercase;
   color: var(--ink-dim);
 }
-/* Votes still queued (F29): quiet, amber like "connecting", pulsing while it drains. */
+/* Votes still queued (F29): quiet, amber like "connecting", pulsing while it drains. Hangs
+   below the count (F31), so appearing and disappearing never moves the header. */
 .board-backlog {
+  position: absolute;
+  top: 100%;
+  right: 0;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  margin-top: 4px;
+  margin-top: 1px;
+  white-space: nowrap;
   font:
     500 13px / 1.4 var(--font-body),
     sans-serif;
@@ -250,17 +346,76 @@ body {
   border-radius: 6px;
   /* z-index needs a positioned box: the overtaking row draws above the rows it passes. */
   position: relative;
+  transition: filter 1s ease;
 }
-.row[data-rising] {
-  animation: overtake 800ms ease-out;
+/* The lift (F31): while a row overtakes, a deep shadow and an accent edge fade in under it
+   (opacity only), then fade out as it settles. */
+.row::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  box-shadow:
+    0 0 0 1px var(--accent-from),
+    0 0 28px -4px var(--accent-from),
+    0 14px 30px -10px rgb(0 0 0 / 0.7);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 500ms ease-out;
 }
-.row[data-leader] {
+.row[data-rising]::after {
+  opacity: 1;
+  transition-duration: 120ms;
+}
+/* The leader's highlight: one element, handed from leader to leader (contestant-row.tsx). */
+.row-glow {
+  position: absolute;
+  inset: -1px;
+  z-index: -1;
+  border: 1px solid color-mix(in srgb, var(--accent-from) 45%, var(--line));
+  border-radius: inherit;
   background: linear-gradient(
     90deg,
     color-mix(in srgb, var(--accent-from) 16%, var(--raised)),
     var(--raised) 55%
   );
-  border-color: color-mix(in srgb, var(--accent-from) 45%, var(--line));
+  pointer-events: none;
+}
+/* "+128" rising from the total as votes arrive, then gone (contestant-row.tsx). */
+.row-score {
+  position: relative;
+  display: grid;
+  justify-items: end;
+}
+.row-burst {
+  position: absolute;
+  right: 0;
+  bottom: 100%;
+  font:
+    600 13px / 1 var(--font-display),
+    sans-serif;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  color: color-mix(in srgb, var(--accent-from) 55%, var(--ink));
+  pointer-events: none;
+  animation: burst 900ms var(--ease-spring) forwards;
+}
+@keyframes burst {
+  0% {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  20% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+}
+/* Contest closed: everyone but the winner cools over a second. */
+.board[data-contest="closed"] .row:not([data-leader]) {
+  filter: saturate(0.45);
 }
 .row-rank {
   font:
@@ -273,17 +428,33 @@ body {
 .row[data-leader] .row-rank {
   color: var(--ink);
 }
+.row-rank-roll {
+  position: relative;
+  display: inline-block;
+  overflow: hidden;
+  vertical-align: bottom;
+}
+.row-rank-roll > span {
+  display: inline-block;
+}
 .row-stripe {
   align-self: stretch;
   border-radius: 3px;
   background: linear-gradient(180deg, var(--accent-from), var(--accent-to));
 }
 .row-avatar {
+  display: block;
   width: 52px;
   height: 52px;
+  overflow: hidden;
   border-radius: 50%;
   background: var(--raised);
   box-shadow: 0 0 0 2px var(--accent-from);
+}
+.row-avatar img {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 .row-who {
   display: grid;
@@ -343,9 +514,14 @@ body {
   overflow: hidden;
 }
 .board-layout button {
+  position: relative;
+  isolation: isolate;
   padding: 4px 12px;
   border: 0;
   background: transparent;
+  transition:
+    color var(--dur-snappy) ease,
+    scale 100ms ease-out;
   color: var(--ink-dim);
   font:
     600 12px / 1.4 var(--font-display),
@@ -355,8 +531,18 @@ body {
   cursor: pointer;
 }
 .board-layout button[aria-pressed="true"] {
-  background: var(--raised);
   color: var(--ink);
+}
+/* Feedback on press, not on release (F31). */
+.board-layout button:active {
+  scale: 0.97;
+}
+/* The selected layout's background: one pill that slides between the buttons. */
+.board-layout-pill {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: var(--raised);
 }
 .row-flag {
   margin-right: 4px;
@@ -378,7 +564,6 @@ body {
     "rank total";
   gap: 12px 0;
   padding: 0 16px 14px;
-  overflow: hidden;
   border-radius: 10px;
   background:
     linear-gradient(180deg, transparent 35%, var(--surface) 92%),
@@ -388,15 +573,16 @@ body {
       color-mix(in srgb, var(--accent-to) 40%, var(--surface))
     );
 }
-.row[data-layout="grid"][data-leader] {
+.row[data-layout="grid"] .row-glow {
   border-color: color-mix(in srgb, var(--accent-from) 70%, var(--line));
+  background: none;
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-from) 45%, transparent);
 }
 .row[data-layout="grid"] .row-stripe {
   grid-area: stripe;
   height: 5px;
   margin: 0 -16px;
-  border-radius: 0;
+  border-radius: 9px 9px 0 0;
   background: linear-gradient(90deg, var(--accent-from), var(--accent-to));
 }
 .row[data-layout="grid"] .row-avatar {
@@ -429,8 +615,10 @@ body {
   font-size: 0.7em;
   opacity: 0.7;
 }
-.row[data-layout="grid"] .row-total {
+.row[data-layout="grid"] .row-score {
   grid-area: total;
+}
+.row[data-layout="grid"] .row-total {
   font-size: clamp(28px, 3.4vw, 36px);
 }
 
@@ -509,33 +697,52 @@ body {
   }
 }
 
-/* The overtaker's edge flares in its accent colour, then fades back. */
-@keyframes overtake {
-  0% {
-    box-shadow:
-      0 0 0 1px var(--accent-from),
-      0 0 28px -4px var(--accent-from);
-  }
-  100% {
-    box-shadow:
-      0 0 0 1px transparent,
-      0 0 0 0 transparent;
-  }
-}
 @keyframes pulse {
   50% {
     opacity: 0.35;
   }
 }
+/* Reduced motion (F31): nothing slides or beats. A row that changed place fades back in where
+   it landed instead of gliding there, and a "+N" fades without rising. */
 @media (prefers-reduced-motion: reduce) {
-  .board-status[data-state="reconnecting"]::before {
+  .board-status[data-state="reconnecting"] .board-status-dot {
     animation: none;
   }
-  .board-status[data-state="live"]::before {
-    animation: none;
+  .row[data-rising]::after {
+    opacity: 0;
   }
-  .row[data-rising] {
-    animation: none;
+  .row[data-moved] {
+    animation: settle 300ms ease-out;
+  }
+  .row-burst {
+    animation-name: burst-fade;
+  }
+}
+@keyframes settle {
+  from {
+    opacity: 0.3;
+  }
+}
+@keyframes burst-fade {
+  0%,
+  100% {
+    opacity: 0;
+  }
+  25% {
+    opacity: 1;
+  }
+}
+/* Reduced transparency: the pinned header is solid. More contrast: firmer edges. */
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --glass: var(--ground);
+    --glass-blur: none;
+  }
+}
+@media (prefers-contrast: more) {
+  :root {
+    --line: #4a5366;
+    --ink-dim: #b3bac8;
   }
 }
 
@@ -551,4 +758,25 @@ body {
   .board-side .board-count {
     justify-self: end;
   }
+}
+
+/* Operator pages (F31) ------------------------------------------------------------------- */
+/* The nav is a translucent bar the page scrolls under. */
+.op-nav {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+}
+/* Menus open from their trigger on the app's spring, and close quicker than they open. */
+[data-slot="select-content"][data-state="open"] {
+  --tw-animation-duration: var(--dur-snappy);
+  --tw-ease: var(--ease-spring);
+}
+[data-slot="select-content"][data-state="closed"] {
+  --tw-animation-duration: 120ms;
+  --tw-ease: ease-in;
 }

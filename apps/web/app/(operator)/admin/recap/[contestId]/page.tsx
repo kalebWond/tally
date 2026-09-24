@@ -3,7 +3,6 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { connection } from 'next/server';
 import { z } from 'zod';
-import { AdminNav } from '@/components/admin/admin-nav';
 import { RecapPlayer } from '@/components/admin/recap-player';
 import { requireAdmin } from '@/lib/auth';
 import { getContest } from '@/lib/contests';
@@ -23,10 +22,5 @@ export default async function RecapPage(props: PageProps<'/admin/recap/[contestI
   if (!z.uuid().safeParse(contestId).success || !(await getContest(contestId))) notFound();
 
   const data = await exportRecap(db(), contestId);
-  return (
-    <>
-      <AdminNav current="/admin/contests" />
-      <RecapPlayer data={data} loadedAt={new Date().toISOString()} />
-    </>
-  );
+  return <RecapPlayer data={data} loadedAt={new Date().toISOString()} />;
 }
