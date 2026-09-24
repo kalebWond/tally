@@ -300,9 +300,24 @@ Build one feature per session. Each has a goal, a build list, and a check that d
 
 ---
 
-## F29 — Deployment
+## F29 — Counting backlog
 
-*Renumbered (after F25):* was F26.
+*Added (after F28):* after a long generator run is stopped, totals keep rising while the queue drains, and nothing says how much is left. The later features moved from F29–F33 to F30–F34.
+
+**Build:** Show how many votes are accepted but not yet counted, and roughly how long until they are.
+- **Measure:** the consumer checks its own lag every second (high watermark − committed offset on `votes.raw`, via `@platformatic/kafka`'s `getLag`) and its processing rate. Offsets are committed only after a batch is in Postgres and Redis, so lag is exactly "accepted, not yet counted" (dead letters included, so the wording is "being counted", not "will count").
+- **Publish:** a Redis hash `tally:backlog`: one field per assigned partition, a rate field per consumer instance, `updatedAt`, expiring after 10 s. Several consumer replicas each write their own partitions and readers sum them; with no consumer running the key disappears. Derived from Redpanda and rewritten every second, so nothing lives only in Redis.
+- **Share:** `LiveBacklog { pending, perSec, etaSec }` (null when unknown or stale) and one `parseBacklog` in contracts, used by the gateway and web. Snapshot and update frames gain `backlog`; a change in it triggers an update.
+- **Show:** the generator panel (`/control`) gets a counting-queue tile: waiting, rate, time left, "All counted" at zero, "Counting paused" when no consumer reports. Results pages get a line under the Live/Final badge, "Counting 12,345 queued votes · about 8 s", gone at zero.
+- **Scope:** system-wide. The queue is partitioned by vote code, not by contest, so the figure covers every contest. With two live contests, both pages show the combined number, and a closed contest's page can show "counting" while the other contest's votes drain. Documented, and per-contest tracking deferred.
+
+**Done when:** After a 60 s run at 3,000 votes/s is stopped, the panel's waiting count matches Redpanda's lag for `tally-consumer` (within a second of drift), results pages show the counting line falling to zero and then hide it, and the final total equals the generator's accepted votes. Stopping the consumer mid-drain shows "Counting paused" on the panel and hides the results line; starting it again resumes the drain.
+
+---
+
+## F30 — Deployment
+
+*Renumbered:* was F26, then F29.
 
 **Build:** Production Docker builds. Environment configuration for the chosen host. Deploy and verify.
 
@@ -310,9 +325,9 @@ Build one feature per session. Each has a goal, a build list, and a check that d
 
 ---
 
-## F30 — README and case study
+## F31 — README and case study
 
-*Renumbered (after F25):* was F27.
+*Renumbered:* was F27, then F30.
 
 **Build:** Architecture diagrams, setup instructions, published benchmark numbers, decisions and trade-offs drawn from `DECISIONS.md`, demo video embedded.
 
@@ -320,9 +335,9 @@ Build one feature per session. Each has a goal, a build list, and a check that d
 
 ---
 
-## Optional: F31–F33 — Kubernetes
+## Optional: F32–F34 — Kubernetes
 
-*Renumbered (after F25):* was F28–F30.
+*Renumbered:* was F28–F30, then F31–F33.
 
 **Prerequisites already satisfied:** environment-variable config, no local disk state, health endpoints, graceful SIGTERM.
 
@@ -341,7 +356,7 @@ Build one feature per session. Each has a goal, a build list, and a check that d
 | 14–19 | F14–F19 | Operational depth and real numbers |
 | 20–22 | F20–F22 | Analytics separation |
 | 23–27 | F23–F25 | Polished and presentable |
-| 28–30 | F26–F28 | Run a whole contest from the browser |
-| 31–32 | F29–F30 | Deployed and written up |
+| 28–31 | F26–F29 | Run a whole contest from the browser |
+| 32–33 | F30–F31 | Deployed and written up |
 
 Stopping after session 13 already leaves you with something worth showing.

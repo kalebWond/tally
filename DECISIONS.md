@@ -15,6 +15,7 @@ Where the build departs from `SPEC.md` or `IMPLEMENTATION_PLAN.md`, or pins down
 | Feature list (plan) | F26 deployment, F27 README, optional F28–F30 Kubernetes | new F26 create contests, F27 sample contestants, F28 recap in the browser (plus `pnpm contests`); deployment is now F29, README F30, Kubernetes F31–F33. Earlier entries that mention deployment were updated to F29 | after F25 |
 | Contest lifecycle (SPEC §7, F16) | draft → open, open → closed, closed → open; no create or delete in the admin | plus `POST /api/contests` (a draft) and `DELETE /api/contests/:id` (drafts only); opening needs an active contestant; contest names unique ignoring case (migration `0005`) | F26 |
 | Recap in the browser (plan F28) | an admin-only API returns the recap data for the page | no API: `/admin/recap/[contestId]` is a server component that calls the same exporter and hands the data to the player; Refresh re-runs it. Layout gains `packages/recap-video` | F28 |
+| Feature list (plan), again | F29 deployment, F30 README, optional F31–F33 Kubernetes | new F29 counting backlog; deployment is now F30, README F31, Kubernetes F32–F34. Earlier entries that mention deployment were updated to F30 | after F28 |
 | Voter hash (SPEC §5) | `SHA-256` of sender + salt | `HMAC-SHA256`, salt as the key, sender trimmed first | F3 |
 | Idempotency key (SPEC §6, plan F3) | ingest generates one (a UUID) | client `Idempotency-Key` header is honoured; ingest generates a UUID only when absent. Keys are 1–128 visible ASCII, not necessarily UUIDs | F3 |
 | `votes` constraints (SPEC §5) | FK only on `contestants.contest_id` | FKs also on `votes.contest_id`, `votes.contestant_id`, `vote_totals`, `vote_buckets` (no cascades). Contestants with votes can't be deleted, only deactivated | F2 |
@@ -108,7 +109,7 @@ None other. *Resolved (F13):* `apps/web`'s exit code 143 on SIGTERM was taken fo
 
 **Decided:** `docker compose up` starts only Redpanda, Postgres and Redis. Services run on the host (`pnpm dev`, `go run`) for fast iteration. `docker compose --profile app up` builds and runs every service in a container for demos, recording, and proving the Dockerfiles.
 **Alternatives:** everything in Compose always (slow edit loop through image rebuilds or bind mounts); infra only (Dockerfiles rot until deployment).
-**Why:** you get the fast loop day to day, and the containerised path stays exercised. Each service gets its Dockerfile when the service is created, not retrofitted at deployment (F29).
+**Why:** you get the fast loop day to day, and the containerised path stays exercised. Each service gets its Dockerfile when the service is created, not retrofitted at deployment (F30).
 
 ## F1 — Redpanda advertises two listeners
 
@@ -183,7 +184,7 @@ None other. *Resolved (F13):* `apps/web`'s exit code 143 on SIGTERM was taken fo
 
 **Decided:** the `app` profile has a `migrate` service (`node dist/migrate.js && node dist/seed.js`). Consumer and web wait for `service_completed_successfully`. On the host: `pnpm db:migrate` and `pnpm db:seed`.
 **Alternatives:** each service migrates on boot (races between replicas); migrate by hand.
-**Why:** one owner for schema changes, and it's the same shape as a Kubernetes Job or init step later. Seeding runs in the local stack only because it's idempotent and the demo needs data. A production deployment (F29) runs migrate alone.
+**Why:** one owner for schema changes, and it's the same shape as a Kubernetes Job or init step later. Seeding runs in the local stack only because it's idempotent and the demo needs data. A production deployment (F30) runs migrate alone.
 
 ## F3 — Idempotency key: honour `Idempotency-Key`, else generate
 
@@ -305,7 +306,7 @@ None other. *Resolved (F13):* `apps/web`'s exit code 143 on SIGTERM was taken fo
 ## F8 — Gateway URL is runtime config passed from the server
 
 **Decided:** the server component reads `GATEWAY_PUBLIC_URL` after `await connection()` and passes it as a prop. No `NEXT_PUBLIC_*`.
-**Why:** Next inlines `NEXT_PUBLIC_*` at build time, so changing the gateway host would mean rebuilding the image. That breaks "config from the environment" and deployment's (F29) "deploy by configuration only". The value is the gateway as the *browser* sees it, so Compose sets `ws://localhost:4001` even for the containerised web app.
+**Why:** Next inlines `NEXT_PUBLIC_*` at build time, so changing the gateway host would mean rebuilding the image. That breaks "config from the environment" and deployment's (F30) "deploy by configuration only". The value is the gateway as the *browser* sees it, so Compose sets `ws://localhost:4001` even for the containerised web app.
 
 ## F8 — Ranking rules
 
@@ -661,7 +662,7 @@ What I found along the way:
 - **Another session's processes:** 5 more headless Chrome instances belong to another project's session on this machine; I left them.
 - **Ingest's ceiling:** one Node process tops out at about 0.95 of a core, near 3,000/s.
 
-The generator reaches 3,000/s cleanly while k6, a JavaScript VM per virtual user competing for the same 8 threads, doesn't, so the likeliest cause is CPU budget on one shared laptop. That's not proven. Next steps: k6 on another machine, and more than one ingest replica (F29).
+The generator reaches 3,000/s cleanly while k6, a JavaScript VM per virtual user competing for the same 8 threads, doesn't, so the likeliest cause is CPU budget on one shared laptop. That's not proven. Next steps: k6 on another machine, and more than one ingest replica (F30).
 
 ## F23 — How "a generator burst is clearly visible as a lag spike and recovery" was verified
 Generator at 800 votes/s for 90 s, a burst to 3,000/s for 45 s (SPEC's burst target), then 90 s at 800/s. The dashboard's own queries were read back from Prometheus, and Grafana was screenshotted (`load-results/grafana-burst-3000.png`):
@@ -770,3 +771,12 @@ Headless Chrome, signed in, against "Tally Showcase" (closed, 980,508 votes). 12
 - **Same as the MP4:** `pnpm recap` rendered the same contest (1080p, 32 s, 71 race steps). Its frame at 30 s and the player paused at 0:31 show the same winner screen: portrait, name, 228,365 votes, 23.3%, "41,048 ahead of Eska Morrowdal".
 - **Elsewhere:** "Tally Finals" (no votes after the reset) says there's nothing to recap; an invalid ID gives 404; signed out redirects to login; a results page loads no Remotion code.
 - `pnpm contests` listed all four contests with their votes, showing at once that "Tally Finals" is empty. The exporter's tests moved with it and pass; `listContests` has one of its own.
+
+## Plan — Counting backlog (F29)
+**Why:** after a long generator run is stopped, totals keep rising for a while as the queue drains, and nothing tells the operator or viewers how much is left, so they watch the numbers until they stop.
+**Decided:** the consumer measures its own lag every second (`getLag` in `@platformatic/kafka`: high watermark − committed offset per partition) and its rate, and writes them to a Redis hash `tally:backlog` that expires after 10 s. The gateway adds a `backlog` field to its frames, the generator status API adds it for `/control`, and both parse it with one `parseBacklog` in contracts. Shown on the generator panel (waiting, rate, time left) and as a counting line on results pages, per the user.
+- **Why lag is the right number:** offsets are committed only after a batch is in Postgres and Redis, so lag is exactly the votes accepted but not yet counted. It includes votes that will become dead letters, so the wording says "being counted".
+- **Several consumers:** each writes only its own partitions' fields and its own rate field, and readers sum them, so the figure stays right if the consumer is scaled out (F32–F34). The expiry makes it disappear when no consumer runs, which the panel shows as "Counting paused".
+- **Redis rule:** the hash is derived from Redpanda and rewritten every second, so nothing exists only in Redis.
+- **Scope, system-wide, and two live contests:** `votes.raw` is partitioned by vote code, not by contest, so lag can't be split by contest without extra bookkeeping. With two contests live at once, both results pages show the same combined number. A contest that has closed can show "counting" while another contest's votes are still draining, even when all of its own votes are in. The results line says "queued votes", and its tooltip says the figure covers all live contests. The user accepted this, with the note.
+**Alternatives:** per-contest backlog (the consumer would track each contest's position in the queue; deferred until two simultaneous contests matter); reading Prometheus (optional, and can be stopped); a Kafka client in the gateway or web (the gateway is Redis-only by design, and web would carry a second Kafka client for one number).

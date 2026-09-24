@@ -129,7 +129,7 @@ A feature is done when its check in `IMPLEMENTATION_PLAN.md` passes, tests cover
 Update this section as you go.
 
 **Last completed:** F28, recap in the browser (2026-09-24)
-**Next up:** F29, deployment (see `IMPLEMENTATION_PLAN.md`): needs the host, domain and permission to deploy. Outstanding: the k6 spike regression (DECISIONS, F23); more than one ingest replica is the obvious next step there.
+**Next up:** F29, counting backlog (planned, waiting for the go-ahead); then F30, deployment, which needs the host, domain and permission to deploy (see `IMPLEMENTATION_PLAN.md`). Outstanding: the k6 spike regression (DECISIONS, F23); more than one ingest replica is the obvious next step there.
 
 **Seed contest:** `0192f3a0-7c1e-7000-8000-00000000c0de`, codes `C1`–`C10`. A closed demo contest, "Tally Finals" (F1–F10), exists in the dev database for recaps.
 
