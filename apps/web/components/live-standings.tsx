@@ -4,6 +4,7 @@ import type { ContestStatus } from '@tally/contracts';
 import { MotionConfig } from 'motion/react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { backlogLine } from '@/lib/backlog-text';
 import { type Movement, movements } from '@/lib/movement';
 import { type Entrant, rank, unknownIds } from '@/lib/standings';
 import { AnimatedNumber } from './animated-number';
@@ -126,8 +127,10 @@ export function LiveStandings({ contest, entrants, gatewayUrl, initialLayout }: 
     else url.searchParams.set('view', next);
     window.history.replaceState(window.history.state, '', url);
   };
-  const { totals, totalVotes, status, minutes, minutesTo, connection, synced, retryAt } =
+  const { totals, totalVotes, status, minutes, minutesTo, backlog, connection, synced, retryAt } =
     useLiveTotals(gatewayUrl, contest.id);
+  // Votes still in the queue (F29). Shown only while the connection is live: stale numbers hide.
+  const counting = connection === 'live' ? backlogLine(backlog) : null;
   // The gateway's status (F16) wins, so a close shows without a reload; it is null when Redis
   // doesn't know, and then the status this page was rendered with stands.
   const contestStatus = status ?? contest.status;
@@ -191,6 +194,15 @@ export function LiveStandings({ contest, entrants, gatewayUrl, initialLayout }: 
                 <span className="board-count-value">–</span>
               )}
               <span className="board-count-label">votes</span>
+              {counting && (
+                <span
+                  className="board-backlog"
+                  data-testid="backlog"
+                  title="Votes accepted but not yet counted, across all live contests."
+                >
+                  {counting}
+                </span>
+              )}
             </div>
           </div>
         </header>

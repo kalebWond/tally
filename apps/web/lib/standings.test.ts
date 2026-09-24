@@ -27,6 +27,7 @@ const snapshot = (
   status,
   minutes: [],
   minutesTo: 0,
+  backlog: null,
   ts: 1,
 });
 
@@ -42,6 +43,7 @@ const update = (
   status,
   minutes: [],
   minutesTo: 0,
+  backlog: null,
   ts: 2,
 });
 

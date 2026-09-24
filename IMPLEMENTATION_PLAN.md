@@ -311,6 +311,8 @@ Build one feature per session. Each has a goal, a build list, and a check that d
 - **Show:** the generator panel (`/control`) gets a counting-queue tile: waiting, rate, time left, "All counted" at zero, "Counting paused" when no consumer reports. Results pages get a line under the Live/Final badge, "Counting 12,345 queued votes · about 8 s", gone at zero.
 - **Scope:** system-wide. The queue is partitioned by vote code, not by contest, so the figure covers every contest. With two live contests, both pages show the combined number, and a closed contest's page can show "counting" while the other contest's votes drain. Documented, and per-contest tracking deferred.
 
+*Decided (F29):* built as planned; the panel reads a separate `GET /api/generator/backlog` (the generator's status contract stays the generator's), and fields expire one by one (`HEXPIRE`). Verified by stopping the consumer during a 3,000/s run instead (a running consumer drains 3,000/s within a second): "Counting paused", then 41,068 waiting matching Redpanda within half a second of counting, the results line falling to zero in 6 s, and all 80,276 accepted votes counted.
+
 **Done when:** After a 60 s run at 3,000 votes/s is stopped, the panel's waiting count matches Redpanda's lag for `tally-consumer` (within a second of drift), results pages show the counting line falling to zero and then hide it, and the final total equals the generator's accepted votes. Stopping the consumer mid-drain shows "Counting paused" on the panel and hides the results line; starting it again resumes the drain.
 
 ---

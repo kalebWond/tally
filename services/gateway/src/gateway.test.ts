@@ -128,6 +128,41 @@ describe('gateway /live', () => {
     client.ws.close();
   });
 
+  it('carries the system-wide backlog, and a change in it alone sends an update (F29)', async () => {
+    await setTotals({ [A]: 3 });
+    const report = (lag: number, rate: number) =>
+      redis.hset(redisKeys.backlog, {
+        'lag:0': lag,
+        'lag:1': 0,
+        'rate:x': rate,
+        updatedAt: Date.now(),
+      });
+    await report(900, 300);
+    const client = connect();
+    await until(() => client.frames.length === 1);
+    expect(client.frames[0]?.msg).toMatchObject({
+      type: 'snapshot',
+      backlog: { pending: 900, perSec: 300, etaSec: 3 },
+    });
+
+    await report(0, 300);
+    await until(() => client.frames.length === 2);
+    expect(client.frames[1]?.msg).toMatchObject({
+      type: 'update',
+      changed: [],
+      backlog: { pending: 0, perSec: 300, etaSec: 0 },
+    });
+
+    // The same backlog again sends nothing; no consumer reporting any more reads as unknown.
+    await report(0, 300);
+    await sleep(POLL_MS * 4);
+    expect(client.frames).toHaveLength(2);
+    await redis.del(redisKeys.backlog);
+    await until(() => client.frames.length === 3);
+    expect(client.frames[2]?.msg).toMatchObject({ type: 'update', backlog: null });
+    client.ws.close();
+  });
+
   it('snapshot carries the last 30 minutes, ending at the current minute while the contest is live', async () => {
     await awayFromMinuteEdge();
     const now = Math.floor(Date.now() / 60_000) * 60_000;

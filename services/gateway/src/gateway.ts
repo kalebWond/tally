@@ -3,11 +3,13 @@ import {
   ContestStatus,
   HEARTBEAT_MS,
   type HealthResponse,
+  type LiveBacklog,
   LiveCloseCodes,
   type LiveHeartbeat,
   type LiveSnapshot,
   type LiveUpdate,
   MINUTES_WINDOW,
+  parseBacklog,
   redisKeys,
 } from '@tally/contracts';
 import { createMetrics, LATENCY_BUCKETS } from '@tally/metrics';
@@ -41,6 +43,8 @@ interface Room {
   /** Per-minute counts in the current window, and the window's last minute (F17). */
   minutes: Map<number, number>;
   minutesTo: number;
+  /** Votes waiting to be counted, system-wide (F29). */
+  backlog: LiveBacklog;
   ready: Promise<void>;
   timer?: NodeJS.Timeout;
   closed: boolean;
@@ -74,9 +78,10 @@ export function createGateway({
   const alive = new WeakMap<WebSocket, boolean>();
 
   async function read(contestId: string) {
-    const [totals, [totalVotes, status, lastMinute]] = await Promise.all([
+    const [totals, [totalVotes, status, lastMinute], backlog] = await Promise.all([
       redis.hgetall(redisKeys.totals(contestId)),
       redis.hmget(redisKeys.meta(contestId), 'totalVotes', 'status', 'lastMinute'),
+      redis.hgetall(redisKeys.backlog),
     ]);
     const map = new Map(Object.entries(totals).map(([id, v]) => [id, Number(v)]));
     const sum = [...map.values()].reduce((s, v) => s + v, 0);
@@ -104,6 +109,7 @@ export function createGateway({
       status: known.success ? known.data : null,
       minutes,
       minutesTo,
+      backlog: parseBacklog(backlog, Date.now()),
     };
   }
 
@@ -129,6 +135,7 @@ export function createGateway({
         const statusMoved = next.status !== room.status;
         const minutesChanged = diffMinutes(room.minutes, next.minutes);
         const windowMoved = next.minutesTo !== room.minutesTo;
+        const backlogMoved = JSON.stringify(next.backlog) !== JSON.stringify(room.backlog);
         // Assign and broadcast together, with no await in between: every client's state is
         // always "snapshot + the updates computed after it".
         room.last = next.totals;
@@ -136,7 +143,15 @@ export function createGateway({
         room.status = next.status;
         room.minutes = next.minutes;
         room.minutesTo = next.minutesTo;
-        if (changed.length || totalsMoved || statusMoved || minutesChanged.length || windowMoved) {
+        room.backlog = next.backlog;
+        if (
+          changed.length ||
+          totalsMoved ||
+          statusMoved ||
+          minutesChanged.length ||
+          windowMoved ||
+          backlogMoved
+        ) {
           broadcast(room, {
             type: 'update',
             contestId: room.contestId,
@@ -145,6 +160,7 @@ export function createGateway({
             status: next.status,
             minutes: minutesChanged,
             minutesTo: next.minutesTo,
+            backlog: next.backlog,
             ts: Date.now(),
           });
         }
@@ -166,6 +182,7 @@ export function createGateway({
       status: null,
       minutes: new Map(),
       minutesTo: 0,
+      backlog: null,
       ready: Promise.resolve(),
       closed: false,
     };
@@ -175,6 +192,7 @@ export function createGateway({
       room.status = first.status;
       room.minutes = first.minutes;
       room.minutesTo = first.minutesTo;
+      room.backlog = first.backlog;
       schedulePoll(room);
     });
     rooms.set(contestId, room);
@@ -213,6 +231,7 @@ export function createGateway({
       status: room.status,
       minutes: [...room.minutes].map(([minute, count]) => ({ minute, count })),
       minutesTo: room.minutesTo,
+      backlog: room.backlog,
       ts: Date.now(),
     };
     ws.send(JSON.stringify(snapshot));

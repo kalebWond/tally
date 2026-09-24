@@ -29,6 +29,20 @@ export type LiveMinute = z.infer<typeof LiveMinute>;
 /** Minutes the per-minute chart shows, ending at `minutesTo`. */
 export const MINUTES_WINDOW = 30;
 
+/**
+ * Votes accepted but not yet counted, across every contest (F29): the queue is partitioned by
+ * code, not contest. Null when unknown: no consumer is reporting. `etaSec` is null while nothing
+ * is being counted (rate 0).
+ */
+export const LiveBacklog = z
+  .object({
+    pending: z.number().int().nonnegative(),
+    perSec: z.number().int().nonnegative(),
+    etaSec: z.number().int().nonnegative().nullable(),
+  })
+  .nullable();
+export type LiveBacklog = z.infer<typeof LiveBacklog>;
+
 export const LiveSnapshot = z.object({
   type: z.literal('snapshot'),
   contestId: z.uuid(),
@@ -42,6 +56,7 @@ export const LiveSnapshot = z.object({
    * had votes, so its chart doesn't scroll away into empty time.
    */
   minutesTo: z.number().int(),
+  backlog: LiveBacklog,
   /** Server time of the read, epoch ms. */
   ts: z.number().int(),
 });
@@ -58,6 +73,8 @@ export const LiveUpdate = z.object({
   /** Only the minutes whose count changed. Minutes before `minutesTo - MINUTES_WINDOW + 1` drop out. */
   minutes: z.array(LiveMinute),
   minutesTo: z.number().int(),
+  /** Sent on every update; a backlog change alone also produces one. */
+  backlog: LiveBacklog,
   ts: z.number().int(),
 });
 export type LiveUpdate = z.infer<typeof LiveUpdate>;

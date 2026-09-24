@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   Consumer,
   type Message,
@@ -8,6 +9,7 @@ import type { Db } from '@tally/db';
 import { createMetrics, type Metrics } from '@tally/metrics';
 import type { Redis } from 'ioredis';
 import type { Logger } from 'pino';
+import { createBacklogReporter } from './backlog.js';
 import { createDeadLetterPublisher } from './dead-letter-publisher.js';
 import { processBatch } from './process.js';
 import { createResolver } from './resolver.js';
@@ -81,6 +83,15 @@ export function createVoteConsumer(opts: VoteConsumerOptions) {
   let timer: NodeJS.Timeout | undefined;
   let stream: MessagesStream<string, string, string, string>;
   let loop: Promise<void> | undefined;
+
+  // F29: how many votes are waiting, published to Redis every second for the panel and results.
+  const backlog = createBacklogReporter({
+    getLag: async () => (await consumer.getLag({ topics: [topic] })).get(topic) ?? [],
+    processed: () => stats.processed,
+    redis,
+    instanceId: randomUUID(),
+    log,
+  });
 
   async function processWithRetry(batch: VoteMessage[]) {
     const inbound = batch.map((m) => ({
@@ -158,6 +169,7 @@ export function createVoteConsumer(opts: VoteConsumerOptions) {
         maxWaitTime: maxWaitMs,
       });
       timer = setInterval(() => void flush(), maxWaitMs);
+      backlog.start();
       loop = (async () => {
         for await (const m of stream) {
           buffer.push(m);
@@ -172,6 +184,7 @@ export function createVoteConsumer(opts: VoteConsumerOptions) {
     async stop() {
       stopping = true;
       clearInterval(timer);
+      backlog.stop();
       await stream?.close();
       await loop;
       await flush();

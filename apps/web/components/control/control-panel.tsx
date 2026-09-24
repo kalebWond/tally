@@ -1,6 +1,6 @@
 'use client';
 
-import type { GeneratorStatus } from '@tally/contracts';
+import type { GeneratorStatus, LiveBacklog } from '@tally/contracts';
 import { ExternalLink } from 'lucide-react';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
@@ -16,6 +16,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Slider } from '@/components/ui/slider';
+import { timeLeft } from '@/lib/backlog-text';
 import { RateChart } from './rate-chart';
 import { useGenerator } from './use-generator';
 
@@ -32,7 +33,7 @@ export function ControlPanel({
   contests: Contest[];
   defaultContestId?: string | undefined;
 }) {
-  const { status, reachable, history, error, busy, act } = useGenerator();
+  const { status, reachable, history, error, busy, act, backlog } = useGenerator();
   const [contestId, setContestId] = useState(defaultContestId ?? '');
   const [rate, setRate] = useState(500);
   const [invalidPct, setInvalidPct] = useState(5);
@@ -276,6 +277,23 @@ export function ControlPanel({
             </CardContent>
           </Card>
 
+          <Card data-testid="backlog-card">
+            <CardHeader>
+              <CardTitle>Counting queue</CardTitle>
+              <CardDescription data-testid="backlog-note">{backlogNote(backlog)}</CardDescription>
+            </CardHeader>
+            <CardContent className="grid grid-cols-3 gap-3">
+              <Stat name="pending" label="Waiting" value={backlog?.pending} />
+              <Stat name="perSec" label="Counting" value={backlog?.perSec} unit="/s" />
+              <Stat
+                name="etaSec"
+                label="Time left"
+                value={backlog?.etaSec}
+                text={backlog ? (backlog.pending === 0 ? 'Done' : timeLeft(backlog.etaSec)) : null}
+              />
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
               <CardTitle>Counters</CardTitle>
@@ -317,6 +335,16 @@ export function ControlPanel({
   );
 }
 
+/** Votes accepted but not yet counted (F29): the queue is shared by every contest. */
+function backlogNote(backlog: LiveBacklog | undefined) {
+  if (backlog === undefined) return 'Reading the queue…';
+  if (backlog === null)
+    return 'Counting paused: no consumer is reporting, so the queue can’t be measured.';
+  if (backlog.pending === 0)
+    return 'All counted. Votes accepted but not yet counted, across all contests.';
+  return 'Votes accepted but not yet counted, across all contests. Totals keep rising until this reaches 0.';
+}
+
 function countersNote(status: GeneratorStatus | null) {
   if (status?.running && status.startedAt) {
     return `This run, since ${new Date(status.startedAt).toLocaleTimeString()}.`;
@@ -349,8 +377,10 @@ function Stat(props: {
   unit?: string;
   digits?: number;
   alert?: boolean;
+  /** Shown instead of the formatted number, when set. */
+  text?: string | null;
 }) {
-  const { name, label, value, unit = '', digits = 0, alert } = props;
+  const { name, label, value, unit = '', digits = 0, alert, text } = props;
   const known = value !== null && value !== undefined;
   return (
     <div
@@ -362,9 +392,11 @@ function Stat(props: {
       <div
         className={`font-heading text-2xl font-semibold tabular-nums ${alert && known && value > 0 ? 'text-destructive' : ''}`}
       >
-        {known
-          ? `${value.toLocaleString('en', { maximumFractionDigits: digits, minimumFractionDigits: digits })}${unit}`
-          : '—'}
+        {text
+          ? text
+          : known
+            ? `${value.toLocaleString('en', { maximumFractionDigits: digits, minimumFractionDigits: digits })}${unit}`
+            : '—'}
       </div>
     </div>
   );

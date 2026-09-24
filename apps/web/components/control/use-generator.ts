@@ -1,6 +1,6 @@
 'use client';
 
-import { ErrorResponse, GeneratorStatus } from '@tally/contracts';
+import { ErrorResponse, GeneratorStatus, LiveBacklog } from '@tally/contracts';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { addSample, type RatePoint, type RateSample } from '@/lib/rate-history';
 
@@ -20,6 +20,8 @@ export function useGenerator() {
   const [history, setHistory] = useState<RatePoint[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<Action | null>(null);
+  /** Votes waiting to be counted (F29); undefined until read, or while Redis isn't answering. */
+  const [backlog, setBacklog] = useState<LiveBacklog | undefined>(undefined);
   const last = useRef<RateSample | undefined>(undefined);
 
   const accept = useCallback((next: GeneratorStatus) => {
@@ -40,7 +42,17 @@ export function useGenerator() {
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout>;
     let stopped = false;
+    const readBacklog = async () => {
+      try {
+        const res = await fetch('/api/generator/backlog', { cache: 'no-store' });
+        const body = LiveBacklog.safeParse(((await res.json()) as { backlog?: unknown }).backlog);
+        setBacklog(res.ok && body.success ? body.data : undefined);
+      } catch {
+        setBacklog(undefined);
+      }
+    };
     const poll = async () => {
+      void readBacklog();
       try {
         const res = await fetch('/api/generator/status', { cache: 'no-store' });
         if (res.status === 401) return signIn();
@@ -88,7 +100,7 @@ export function useGenerator() {
     [accept],
   );
 
-  return { status, reachable, history, error, busy, act };
+  return { status, reachable, history, error, busy, act, backlog };
 }
 
 function describe({ issues, error }: ErrorResponse) {

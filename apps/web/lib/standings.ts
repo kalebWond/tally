@@ -1,4 +1,9 @@
-import { type ContestStatus, type LiveMessage, MINUTES_WINDOW } from '@tally/contracts';
+import {
+  type ContestStatus,
+  type LiveBacklog,
+  type LiveMessage,
+  MINUTES_WINDOW,
+} from '@tally/contracts';
 
 /** A contestant's display details, loaded from Postgres by the server component. */
 export interface Entrant {
@@ -23,6 +28,8 @@ export interface Totals {
   minutes: ReadonlyMap<number, number>;
   /** The window's last minute; null before the first snapshot. */
   minutesTo: number | null;
+  /** Votes accepted but not yet counted, across all contests (F29); null = unknown. */
+  backlog: LiveBacklog;
 }
 
 export interface Standing extends Entrant {
@@ -37,6 +44,7 @@ export const emptyTotals = (): Totals => ({
   status: null,
   minutes: new Map(),
   minutesTo: null,
+  backlog: null,
 });
 
 const MINUTE = 60_000;
@@ -51,6 +59,7 @@ export function applyFrame(state: Totals, frame: LiveMessage): Totals {
       status: frame.status,
       minutes: new Map(frame.minutes.map((m) => [m.minute, m.count])),
       minutesTo: frame.minutesTo,
+      backlog: frame.backlog,
     };
   }
   const totals = new Map(state.totals);
@@ -65,6 +74,7 @@ export function applyFrame(state: Totals, frame: LiveMessage): Totals {
     status: frame.status,
     minutes,
     minutesTo: frame.minutesTo,
+    backlog: frame.backlog,
   };
 }
 

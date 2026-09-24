@@ -191,6 +191,31 @@ body {
   text-transform: uppercase;
   color: var(--ink-dim);
 }
+/* Votes still queued (F29): quiet, amber like "connecting", pulsing while it drains. */
+.board-backlog {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font:
+    500 13px / 1.4 var(--font-body),
+    sans-serif;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-dim);
+}
+.board-backlog::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--warn);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .board-backlog::before {
+    animation: none;
+  }
+}
 
 /* Rows ------------------------------------------------------------------ */
 .board-rows {

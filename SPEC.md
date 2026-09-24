@@ -165,6 +165,8 @@ tally:{contestId}:meta            hash    lastUpdated, totalVotes
 tally:idem:{key}                  string  TTL 1h, redelivery guard
 ```
 
+*Changed (F29):* plus `tally:backlog`, system-wide: `lag:<partition>` per partition of `votes.raw` (written by the consumer that owns it), `rate:<instance>` per consumer, and `updatedAt`, each field expiring 10 s after it's written. Rewritten every second from the consumers' own lag (high watermark − committed offset), so it's derived from Redpanda like everything else here is from Postgres.
+
 *Changed (F5):* no `tally:idem:*` keys. Postgres's unique `idempotency_key` is the only dedupe, and the consumer **sets** `totals` and `meta.totalVotes` to absolute values read back from Postgres (upward only, via a Lua script) instead of incrementing, so redelivery after a crash heals Redis. Key builders live in contracts (`redisKeys`).
 
 ---
@@ -225,6 +227,8 @@ Only changed contestants are sent after the initial snapshot.
 
 *Changed (F17):* snapshots and updates also carry `minutes` (`{ minute, count }`, the contest's votes per minute: the whole 30-minute window in a snapshot, changed minutes in an update) and `minutesTo` (the window's last minute).
 
+*Changed (F29):* snapshots and updates also carry `backlog`: `{ pending, perSec, etaSec }`, the votes accepted but not yet counted **across all contests** (the queue is partitioned by code, not contest), or null when no consumer is reporting; a backlog change alone sends an update.
+
 *Changed (F16):* snapshots and updates also carry `status` (the contest's status, or null when Redis doesn't have it); a status change alone sends an update.
 
 *Changed (F11):* the gateway also sends `{ "type": "heartbeat", "ts" }` every 15 s; a client that hears nothing for 35 s treats the connection as dead. Clients reconnect forever with jittered backoff (0.5 s → 10 s), and every reconnect starts with a fresh snapshot.
@@ -242,6 +246,8 @@ GET  /status  → { running, currentRate, sentTotal }
 *Changed (F13):* `POST /rate { ratePerSec }` changes a running generator's rate without resetting counters (409 when stopped). Browsers never call the generator directly: the control panel goes through the web app's `/api/generator/*` handlers (session-checked), which read the contest's codes from Postgres for `/start`.
 
 ### Admin (web, shared-password protected)
+
+*Decided (F29):* `GET /api/generator/backlog` answers `{ backlog }` (the same `LiveBacklog` as the live frames, from `tally:backlog`), 503 when Redis is down. The generator panel polls it next to `/status`.
 
 *Decided (F13):* the gate is `ADMIN_PASSWORD` plus a signed, httpOnly session cookie issued by `/login`; it protects `/control` and `/api/generator/*` now, and the admin routes below from F14.
 

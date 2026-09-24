@@ -1,3 +1,4 @@
+export * from './backlog.ts';
 export * from './contest.ts';
 export * from './contestant.ts';
 export * from './dead-letter.ts';
