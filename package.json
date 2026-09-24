@@ -16,6 +16,7 @@
     "db:generate": "pnpm --filter @tally/db generate",
     "db:migrate": "pnpm --filter @tally/db migrate",
     "db:seed": "pnpm --filter @tally/db seed",
+    "contests": "pnpm --silent --filter @tally/db contests",
     "infra:up": "docker compose up -d --wait",
     "stack:up": "docker compose --profile app up -d --build --wait",
     "down": "docker compose --profile app down",

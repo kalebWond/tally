@@ -1,7 +1,7 @@
 'use client';
 
 import { type Contest, ErrorResponse } from '@tally/contracts';
-import { ExternalLink, Plus, Trash2, Users } from 'lucide-react';
+import { Clapperboard, ExternalLink, Plus, Trash2, Users } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { type FormEvent, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
@@ -232,6 +232,13 @@ export function ContestsAdmin({
                           <Users /> Contestants
                         </a>
                       </Button>
+                      {c.status !== 'draft' && (
+                        <Button variant="outline" size="sm" asChild>
+                          <a href={`/admin/recap/${c.id}`} data-testid={`recap-${c.id}`}>
+                            <Clapperboard /> Recap
+                          </a>
+                        </Button>
+                      )}
                       <Button variant="outline" size="sm" asChild>
                         <a href={`/results/${c.id}`} target="_blank" rel="noreferrer">
                           Results <ExternalLink />

@@ -1,6 +1,9 @@
 import { z } from 'zod';
 
-/** Everything the recap video shows, exported from Postgres by `export.ts`. */
+/**
+ * Everything the recap video shows, exported from Postgres by `export.ts`. The schema is for
+ * Remotion's composition props (the command-line render); the browser player imports the type only.
+ */
 export const RecapData = z.object({
   contest: z.object({
     id: z.string(),
@@ -26,7 +29,3 @@ export const RecapData = z.object({
   steps: z.array(z.object({ minute: z.number(), totals: z.record(z.string(), z.number()) })),
 });
 export type RecapData = z.infer<typeof RecapData>;
-
-export const FPS = 30;
-export const SECTIONS = { intro: 3, race: 16, standings: 6, winner: 7 } as const;
-export const DURATION_FRAMES = Object.values(SECTIONS).reduce((s, x) => s + x, 0) * FPS;

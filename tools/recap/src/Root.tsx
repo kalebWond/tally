@@ -1,6 +1,6 @@
+import { DURATION_FRAMES, FPS, HEIGHT, Recap, WIDTH } from '@tally/recap-video';
+import { RecapData } from '@tally/recap-video/data';
 import { Composition } from 'remotion';
-import { DURATION_FRAMES, FPS, RecapData } from './data.ts';
-import { Recap } from './Recap.tsx';
 
 const EMPTY: RecapData = {
   contest: { id: '', name: 'Tally', status: 'closed', closesAt: null },
@@ -15,8 +15,8 @@ export function Root() {
     <Composition
       id="Recap"
       component={Recap}
-      width={1920}
-      height={1080}
+      width={WIDTH}
+      height={HEIGHT}
       fps={FPS}
       durationInFrames={DURATION_FRAMES}
       defaultProps={EMPTY}

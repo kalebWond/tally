@@ -14,6 +14,7 @@ Where the build departs from `SPEC.md` or `IMPLEMENTATION_PLAN.md`, or pins down
 |---|---|---|---|
 | Feature list (plan) | F26 deployment, F27 README, optional F28–F30 Kubernetes | new F26 create contests, F27 sample contestants, F28 recap in the browser (plus `pnpm contests`); deployment is now F29, README F30, Kubernetes F31–F33. Earlier entries that mention deployment were updated to F29 | after F25 |
 | Contest lifecycle (SPEC §7, F16) | draft → open, open → closed, closed → open; no create or delete in the admin | plus `POST /api/contests` (a draft) and `DELETE /api/contests/:id` (drafts only); opening needs an active contestant; contest names unique ignoring case (migration `0005`) | F26 |
+| Recap in the browser (plan F28) | an admin-only API returns the recap data for the page | no API: `/admin/recap/[contestId]` is a server component that calls the same exporter and hands the data to the player; Refresh re-runs it. Layout gains `packages/recap-video` | F28 |
 | Voter hash (SPEC §5) | `SHA-256` of sender + salt | `HMAC-SHA256`, salt as the key, sender trimmed first | F3 |
 | Idempotency key (SPEC §6, plan F3) | ingest generates one (a UUID) | client `Idempotency-Key` header is honoured; ingest generates a UUID only when absent. Keys are 1–128 visible ASCII, not necessarily UUIDs | F3 |
 | `votes` constraints (SPEC §5) | FK only on `contestants.contest_id` | FKs also on `votes.contest_id`, `votes.contestant_id`, `vote_totals`, `vote_buckets` (no cascades). Contestants with votes can't be deleted, only deactivated | F2 |
@@ -751,3 +752,21 @@ Headless Chrome through the pages, on a fresh contest "Spring Heats F27". 16 of 
 - The draft was deleted afterwards (204, contestants gone).
 - Tests: `sample-contestants.test.ts` (7 valid rows, codes and names skip taken ones, hue gaps ≥ 360/7 − 3°, HSL → hex), `contestant-admin.test.ts` (all or none, which row and who holds the code), and the batch contract (a repeated code points at the second row).
 - The check script clicked before the page had hydrated at first, so the click did nothing; it now clicks until the dialog responds.
+
+## F28 — Recap in the browser: one component, played by Remotion's player
+**Decided:** the recap composition (`Recap.tsx`), its data type and the Postgres exporter moved from `tools/recap` into `packages/recap-video`, used by both `pnpm recap` (which still renders the MP4) and the web app. `/admin/recap/[contestId]` plays it with `@remotion/player`, and each non-draft contest on `/admin/contests` has a "Recap" link.
+- **No API route,** unlike the plan: the page is a server component that calls `exportRecap` itself and passes the data to the player, and Refresh (shown for open contests only) re-runs it with `router.refresh()`. That's the same data with one fewer endpoint to guard; the page is admin-only through the proxy and `requireAdmin`.
+- **Browser-safe entry:** the package's main export holds the component, the timing constants and the data *type*, with no zod or database code. The props schema (`/data`, zod 4.5.4 for Remotion's composition) and the exporter (`/export`) are separate entry points, used by the CLI and the server page only.
+- **Remotion stays off other pages:** it loads only on the recap route. Checked by fetching every script on a results page: none mention Remotion.
+- **Nothing to recap:** a contest with no votes shows a sentence saying so and how to fix it, rather than an empty race, which is what `pnpm recap` produced after `pnpm reset:votes`.
+- **`pnpm contests`** (`packages/db`, `listContests`): every contest newest first with ID, name, status, contestants (active of all), counted votes from `vote_totals`, and when it opened and closed.
+- `acknowledgeRemotionLicense` is not set on the player: Remotion is free for individuals and companies of up to 3 people; the prop only silences a console notice, and accepting the licence is the owner's call.
+**Alternatives:** rendering MP4s on the server (a worker using every core for about 50 s per render, plus file storage the no-local-disk rule would push to object storage); a copy of the composition in the web app (the page and the MP4 would drift).
+
+## F28 — How the done-when was verified
+Headless Chrome, signed in, against "Tally Showcase" (closed, 980,508 votes). 12 of 12 checks passed:
+- **From /admin/contests:** its Recap link opened `/admin/recap/<id>` with the player paused and its controls; the header showed 980,508 votes and 10 contestants, and no Refresh (closed).
+- **Plays:** pressing play, the intro showed the contest's name, the clock advanced every second to 0:29 of 0:32, and the winner reveal showed Postgres's top contestant with their votes (Felix Arnhald, 228,365).
+- **Same as the MP4:** `pnpm recap` rendered the same contest (1080p, 32 s, 71 race steps). Its frame at 30 s and the player paused at 0:31 show the same winner screen: portrait, name, 228,365 votes, 23.3%, "41,048 ahead of Eska Morrowdal".
+- **Elsewhere:** "Tally Finals" (no votes after the reset) says there's nothing to recap; an invalid ID gives 404; signed out redirects to login; a results page loads no Remotion code.
+- `pnpm contests` listed all four contests with their votes, showing at once that "Tally Finals" is empty. The exporter's tests moved with it and pass; `listContests` has one of its own.

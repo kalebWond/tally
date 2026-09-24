@@ -20,7 +20,8 @@
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "remotion": "^4.0.527",
-    "zod": "4.5.4"
+    "zod": "4.5.4",
+    "@tally/recap-video": "workspace:*"
   },
   "devDependencies": {
     "@types/react": "^19.3.0",

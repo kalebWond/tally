@@ -11,7 +11,8 @@ import {
   useCurrentFrame,
   useVideoConfig,
 } from 'remotion';
-import { FPS, type RecapData, SECTIONS } from './data.ts';
+import type { RecapData } from './data.ts';
+import { FPS, SECTIONS } from './timing.ts';
 
 // The scoreboard's look (apps/web globals.css): dark ground, Barlow Condensed display type.
 const { fontFamily: display } = loadDisplay('normal', {

@@ -294,6 +294,8 @@ Build one feature per session. Each has a goal, a build list, and a check that d
 
 **Build:** The recap composition moves from `tools/recap` into a shared package, used by both the command-line render and the web app. `/admin/recap/[contestId]` plays it with Remotion's player, from an admin-only API returning the same data `pnpm recap` renders from. Each contest on `/admin/contests` gets a "Recap" link, and Remotion loads on that page only. An open contest's recap shows the results as of loading, with a Refresh button. Also `pnpm contests`: a table of every contest with ID, name, status, contestant count, votes, and when it opened and closed, so you can find the ID to pass to `pnpm recap`.
 
+*Changed (F28):* no API route: the recap page is a server component calling the same exporter, and Refresh reloads it. The composition, data type and exporter live in `packages/recap-video`. Verified in headless Chrome on "Tally Showcase": the player's winner screen matches the MP4's frame for frame in content (Felix Arnhald, 228,365 votes, 23.3%).
+
 **Done when:** A closed contest's recap plays in the browser from `/admin/contests`, with no terminal, from the same data and component as the MP4. `pnpm contests` lists every contest with its vote count.
 
 ---

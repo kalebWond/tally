@@ -1,8 +1,8 @@
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createContest, deleteContest } from './contest-admin.ts';
+import { createContest, deleteContest, listContests } from './contest-admin.ts';
 import { setContestStatus } from './contest-status.ts';
-import { contestants, contests, votes } from './schema.ts';
+import { contestants, contests, votes, voteTotals } from './schema.ts';
 import { SEED_CONTEST_ID } from './seed.ts';
 import { createTestDatabase } from './testing.ts';
 
@@ -110,5 +110,26 @@ describe('deleteContest', () => {
       ok: false,
       reason: 'not_found',
     });
+  });
+});
+
+describe('listContests', () => {
+  it('lists every contest with contestant counts and counted votes', async () => {
+    const contest = await created('Listed');
+    await addContestant(contest.id, 'L1');
+    await addContestant(contest.id, 'L2', false);
+    const [l1] = await test.db.select().from(contestants).where(eq(contestants.code, 'L1'));
+    if (!l1) throw new Error('no L1');
+    await test.db.insert(voteTotals).values({ contestantId: l1.id, total: 42 });
+    const rows = await listContests(test.db);
+    expect(rows.find((r) => r.id === contest.id)).toMatchObject({
+      name: 'Listed',
+      status: 'draft',
+      activeContestants: 1,
+      contestants: 2,
+      votes: 42,
+    });
+    expect(rows.find((r) => r.id === SEED_CONTEST_ID)).toMatchObject({ contestants: 10 });
+    expect(rows[0]?.id).toBe(contest.id);
   });
 });

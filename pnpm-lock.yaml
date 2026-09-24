@@ -26,6 +26,12 @@ importers:
       '@clickhouse/client':
         specifier: ^1.23.1
         version: 1.23.1
+      '@remotion/google-fonts':
+        specifier: ^4.0.527
+        version: 4.0.527(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+      '@remotion/player':
+        specifier: ^4.0.527
+        version: 4.0.527(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@tally/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
@@ -35,6 +41,9 @@ importers:
       '@tally/metrics':
         specifier: workspace:*
         version: link:../../packages/metrics
+      '@tally/recap-video':
+        specifier: workspace:*
+        version: link:../../packages/recap-video
       class-variance-authority:
         specifier: ^0.7.1
         version: 0.7.1
@@ -74,6 +83,9 @@ importers:
       recharts:
         specifier: ^3.10.1
         version: 3.10.1(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react-is@19.3.0)(react@19.3.0)(redux@5.0.1)
+      remotion:
+        specifier: ^4.0.527
+        version: 4.0.527(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       server-only:
         specifier: ^0.0.1
         version: 0.0.1
@@ -149,6 +161,37 @@ importers:
         specifier: ^15.1.3
         version: 15.1.3
     devDependencies:
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+
+  packages/recap-video:
+    dependencies:
+      '@remotion/google-fonts':
+        specifier: ^4.0.527
+        version: 4.0.527(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+      '@tally/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@tally/db':
+        specifier: workspace:*
+        version: link:../db
+      drizzle-orm:
+        specifier: ^0.45.3
+        version: 0.45.3(@opentelemetry/api@1.9.1)(@types/pg@8.23.1)(pg@8.23.0)
+      remotion:
+        specifier: ^4.0.527
+        version: 4.0.527(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+      zod:
+        specifier: 4.5.4
+        version: 4.5.4
+    devDependencies:
+      '@types/react':
+        specifier: ^19.3.0
+        version: 19.3.0
+      react:
+        specifier: ^19.3.0
+        version: 19.3.0
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
@@ -323,6 +366,9 @@ importers:
       '@tally/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@tally/recap-video':
+        specifier: workspace:*
+        version: link:../../packages/recap-video
       drizzle-orm:
         specifier: ^0.45.3
         version: 0.45.3(@opentelemetry/api@1.9.1)(@types/pg@8.23.1)(pg@8.23.0)

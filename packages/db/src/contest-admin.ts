@@ -1,8 +1,8 @@
 import type { ContestStatus } from '@tally/contracts';
-import { eq, sql } from 'drizzle-orm';
+import { desc, eq, sql } from 'drizzle-orm';
 import type { Db } from './client.ts';
 import { pgCode } from './pg-error.ts';
-import { contestants, contests, votes } from './schema.ts';
+import { contestants, contests, votes, voteTotals } from './schema.ts';
 
 type Contest = typeof contests.$inferSelect;
 
@@ -61,4 +61,37 @@ export async function deleteContest(db: Db, contestId: string): Promise<ContestD
     await tx.delete(contests).where(eq(contests.id, contestId));
     return { ok: true };
   });
+}
+
+/**
+ * Every contest with its contestant counts and counted votes, newest first (F28, `pnpm contests`).
+ * Votes are summed from `vote_totals`, so they match results pages and `pnpm recap`.
+ */
+export async function listContests(db: Db) {
+  const people = db
+    .select({
+      contestId: contestants.contestId,
+      active: sql<number>`count(*) filter (where ${contestants.active})::int`.as('active'),
+      all: sql<number>`count(*)::int`.as('all'),
+      votes: sql<number>`coalesce(sum(${voteTotals.total}), 0)::int`.as('votes'),
+    })
+    .from(contestants)
+    .leftJoin(voteTotals, eq(voteTotals.contestantId, contestants.id))
+    .groupBy(contestants.contestId)
+    .as('people');
+  return db
+    .select({
+      id: contests.id,
+      name: contests.name,
+      status: contests.status,
+      activeContestants: sql<number>`coalesce(${people.active}, 0)`,
+      contestants: sql<number>`coalesce(${people.all}, 0)`,
+      votes: sql<number>`coalesce(${people.votes}, 0)`,
+      opensAt: contests.opensAt,
+      closesAt: contests.closesAt,
+      createdAt: contests.createdAt,
+    })
+    .from(contests)
+    .leftJoin(people, eq(people.contestId, contests.id))
+    .orderBy(desc(contests.createdAt));
 }

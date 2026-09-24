@@ -4,9 +4,9 @@ import { parseArgs } from 'node:util';
 import { bundle } from '@remotion/bundler';
 import { getVideoMetadata, renderMedia, selectComposition } from '@remotion/renderer';
 import { createDb, schema } from '@tally/db';
+import { exportRecap } from '@tally/recap-video/export';
 import { desc, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { exportRecap } from '../export.ts';
 
 // F25: `pnpm recap [contestId] [--out file.mp4]` renders a contest's results recap: intro, bar
 // race over its minute-by-minute history, final standings, winner reveal. Data comes straight
