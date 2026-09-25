@@ -435,9 +435,9 @@ Verified: the F32 functional check in headless Chrome, on the dev build before t
 
 ---
 
-## F33 — Deployment
+## Optional: F33 — Deployment
 
-*Renumbered:* was F26, then F29, then F30, then F31, then F32.
+*Renumbered:* was F26, then F29, then F30, then F31, then F32. *Made optional (after F37):* at the user's request; the next step is running Tally across two devices (F38).
 
 **Build:** Production Docker builds. Environment configuration for the chosen host. Deploy and verify.
 
@@ -526,9 +526,44 @@ Built before F33, like F34, so the deployment starts with the scalable shape. Wi
 
 ---
 
-## Optional: F38–F40 — Kubernetes
+## F38 — Generator on a second device
 
-*Renumbered:* was F28–F30, then F31–F33, then F32–F34, then F33–F35, then F34–F36, then F35–F37, then F37–F39 (F35 and F36 were added), then F38–F40 (F36 ingest replicas was added).
+*Added (after F37):* on the laptop, the whole pipeline tops out at about 4,700 votes/s. The generator used 0.8–1.4 of its 8 threads, competing with ingest and the consumers (`load-results/consumer-replicas.md`). Running the generator on another machine on the same network frees those threads, and makes the traffic cross a real network, as votes from partner platforms would.
+
+**On the app machine (the laptop):**
+- **An override file, `compose.two-device.yaml`**, applied through `COMPOSE_FILE=compose.yaml:compose.two-device.yaml` and `GENERATOR_HOST=<second device's IP>` in `.env`:
+  - the local generator runs with 0 replicas
+  - web and Prometheus map the hostname `generator` to `GENERATOR_HOST`, so `/control`, the dashboard and the `generator:4002` scrape target work unchanged
+- **Scripts reach the generator through `GENERATOR_URL`** (default `http://localhost:4002`): `pnpm load`, `pnpm reset:votes` and `check-health.sh`. The first two stop it before they start, so a remote generator can't keep sending votes into a wipe or a k6 run.
+
+**On the second device:** Docker can't be installed there (Windows 11, AMD Ryzen 7 5800H, x64), so the generator runs as a plain Windows program.
+- **`pnpm generator:exe`** cross-compiles `tools/generator` into `tools/generator/bin/generator.exe`. Go builds a single static file, so the device needs neither Docker nor Go. `scripts/go.sh` passes `GOOS`, `GOARCH` and `CGO_ENABLED` through to its Go container.
+- **A `run-generator.cmd` next to it** sets `INGEST_URL=http://<app machine>:4000` and `GENERATOR_WORKERS=1024`, then starts the program. Each worker waits for its own request, so over a network 256 workers would cap the rate at 256 ÷ latency.
+- **Both files are copied across by hand** (USB stick or shared folder). Nothing is pushed.
+- **Windows Firewall:** the program listens on port 4002, so allow it on private networks when Windows asks. The Wi-Fi network itself must be set to "Private".
+
+*Changed (F38), from the first draft:* a standalone `compose.generator.yaml` for the device was dropped when Docker turned out not to install there. GitHub Codespaces was considered and rejected: it isn't on the local network, it would need a tunnel that puts the unauthenticated ingest on the internet, and it would measure the tunnel, not Tally.
+
+**Done when:**
+- The generator runs on the second device, and `/control` on the laptop starts, stops and re-rates it and shows its status.
+- Prometheus scrapes it.
+- A run at the generator's maximum measures what the laptop's pipeline does without the generator on it, compared with F37's 4,700/s.
+- Every accepted vote is counted exactly once, and `pnpm reconcile` finds no drift.
+
+*Decided (F38), app side:* built and checked on the laptop alone, with a Linux build of the generator on the host at the laptop's LAN address standing in for the second device.
+- **Checked:** `/control`'s API started, re-rated and stopped it, the health check and Prometheus reached it, and every vote was counted exactly once, with no drift.
+- **Two nginx faults (from F36) appeared** once the generator ran with 1,024 workers:
+  - the container's default limit of 1,024 file descriptors (`accept4() failed`)
+  - a 2 s connect timeout that turned overload into failed votes
+- **Fixes:** `worker_rlimit_nofile` plus a container `ulimits`, 1,024 kept-open connections to the replicas, and a 10 s connect timeout.
+- **Workers:** the launcher uses the default 256, since on a LAN more only adds queueing.
+- **Still to do:** the run from the Windows machine, which is the measured part of the done-when.
+
+---
+
+## Optional: F39–F41 — Kubernetes
+
+*Renumbered:* was F28–F30, then F31–F33, then F32–F34, then F33–F35, then F34–F36, then F35–F37, then F37–F39 (F35 and F36 were added), then F38–F40 (F36 ingest replicas was added), then F39–F41 (F38 two devices was added).
 
 **Prerequisites already satisfied:** environment-variable config, no local disk state, health endpoints, graceful SIGTERM.
 
@@ -552,6 +587,7 @@ Built before F33, like F34, so the deployment starts with the scalable shape. Wi
 | 34 | F32 | Stage look |
 | 35 | F34 | Written up |
 | 36 | F35–F37 | Ingest and counting scale out |
-| 37 | F33 | Deployed |
+| 37 | F38 | Two devices |
+| Optional | F33, F39–F41 | Deployed; Kubernetes |
 
 Stopping after session 13 already leaves you with something worth showing.

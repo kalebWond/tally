@@ -39,6 +39,7 @@ Where the build departs from `SPEC.md` or `IMPLEMENTATION_PLAN.md`, or pins down
 | Partition key (SPEC §6, F4) | keyed by `code`, so a contestant's votes stay ordered on one partition | keyed by `idempotency_key` on both topics, spreading votes evenly | F35 |
 | Partition count (F4) | 6 on both topics, fixed in the `topics` job | `TOPIC_PARTITIONS` from the environment, default 24; the `topics` job raises existing topics to it | F35 |
 | Consumer in compose (F1) | one replica on host port 4003; Prometheus scrapes `consumer:4003` | `CONSUMER_REPLICAS` replicas (default 1), no host port; Prometheus finds them by DNS; the health check reaches each inside its container | F37 |
+| Feature list (plan), eighth time | F33 deployment next, optional F38–F40 Kubernetes | deployment made optional at the user's request; new F38 generator on a second device; Kubernetes F39–F41 | after F37 |
 | Feature list (plan), seventh time | F36 scale out counting, optional F37–F39 Kubernetes | new F36 ingest replicas; scale out counting is now F37, Kubernetes F38–F40 | after F35 |
 | Ingest in compose (F1, F4) | one container on host port 4000 | `INGEST_REPLICAS` replicas (default 1) behind nginx (`ingest-proxy`), which takes port 4000; the generator and k6 call the proxy; Prometheus finds replicas by DNS | F36 |
 | Voter hash (SPEC §5) | `SHA-256` of sender + salt | `HMAC-SHA256`, salt as the key, sender trimmed first | F3 |
@@ -1098,4 +1099,35 @@ Details and tables are in `load-results/consumer-replicas.md`.
 - **Deviation:** the plan said 10,000 votes/s. The laptop couldn't deliver it with everything running.
 - **Why total throughput stayed flat:** the laptop was at 5.6–6.1 of 8 logical threads. Each consumer, with its share of Postgres, took CPU from ingest. On this machine, the whole pipeline runs at about 4,700/s however the work is split. What more consumers bought here is a board that keeps up with what's accepted. Adding capacity needs a machine with spare cores.
 - **Afterwards:** the test votes were wiped with `pnpm reset:votes --yes`, which also restarted ingest and the consumer at one replica each. Showcase is closed.
+
+## F38 — Generator on a second device: plain program, compose override
+**Context:** on the laptop, the whole pipeline tops out at about 4,700 votes/s. The generator uses 0.8–1.4 of its 8 threads, competing with the pipeline. The user's second device is a Windows 11 laptop (AMD Ryzen 7 5800H, 8 cores and 16 threads) where Docker wouldn't install.
+
+**Decided:**
+- **The generator runs there as a plain Windows program.** `pnpm generator:exe` cross-compiles it with the existing Go container (`scripts/go.sh` now passes `GOOS`, `GOARCH` and `CGO_ENABLED` through). The result is one static `.exe`, plus a `run-generator.cmd` that sets `INGEST_URL` to this machine's LAN address. The files are copied by hand, so nothing is pushed.
+- **The app machine switches with `compose.two-device.yaml`,** through `COMPOSE_FILE` and `GENERATOR_HOST` in `.env`.
+  - The local generator runs with 0 replicas.
+  - Web and Prometheus resolve `generator` to `GENERATOR_HOST` (`extra_hosts`), so `GENERATOR_URL`, `/control` and the `generator:4002` scrape target stay as they are.
+- **The scripts follow `GENERATOR_HOST`.** `pnpm load` and `pnpm reset:votes` stop the remote run first, since compose can't stop a process on another machine. `check-health.sh` checks it there.
+
+**Alternatives:**
+- **A standalone compose file on the device:** it needs Docker there.
+- **GitHub Codespaces:** it isn't on the LAN. It would need a tunnel exposing the unauthenticated ingest to the internet, and it would measure the tunnel.
+- **Environment variables alone:** Prometheus's config can't read them. Its target would need a second, always-down entry.
+
+**Found on the way: two faults in F36's nginx.** They only appeared with more concurrent connections than F36's test used.
+1. **Descriptors.** The container's default soft limit was 1,024 open files. At 1,024 generator connections nginx failed with `accept4() failed (24: No file descriptors available)`. Fixed with `worker_rlimit_nofile 65536`, a container `ulimits`, and 16,384 connections per worker.
+2. **Connect timeout.** nginx kept only 128 connections to ingest open, so under load it opened new ones to a replica already at full CPU. With a 2 s connect timeout, those turned into failed votes, where calling ingest directly only queued. Fixed by keeping 1,024 connections open, and waiting up to 10 s for a connection (longer than the generator's 8 s limit) so overload shows as latency.
+
+After both fixes, a 256-worker run at 3,000–5,000/s had 0 failures, a p95 of 84 ms and no nginx errors.
+
+**Workers:** the first draft used 1,024. On a LAN, 256 allows about 8,500/s even at 30 ms per request, above what the app machine's pipeline takes, so more only adds queueing. The launcher uses 256.
+
+## F38 — How the app side was verified
+- **Stand-in:** a Linux build of the generator ran on the laptop's host with `GENERATOR_HOST=192.168.1.11`, the laptop's own LAN address. The stack ran with the override: no generator container, and `generator` in web's `/etc/hosts`.
+- **Control and monitoring:** through web's API (the `/control` path), open, status, start, re-rate to 5,000/s and stop all worked. `check-health.sh` reported "generator /health (on 192.168.1.11)" as ok, and Prometheus showed `generator:4002` up.
+- **Counts:** across four check runs, ingest accepted 239,955, and Postgres held 235,112 votes plus 4,843 dead letters, 239,955 in all. `pnpm reconcile` found no drift.
+- **The generator's "failed" requests** (979, from the runs before the nginx fixes) were all accepted too: its 238,976 accepted plus 979 failed also comes to 239,955. Their replies didn't arrive in time, but each vote was published and counted once. A client retry with the same `Idempotency-Key` would have been deduped.
+- **Afterwards:** single-machine mode was restored (the local generator is back, and web has no override) and the test votes were wiped.
+- **Pending:** the run from the Windows machine.
 

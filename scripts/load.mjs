@@ -64,8 +64,20 @@ if (status !== 'open')
 const codes = psql(
   `select string_agg(code, ',' order by code) from contestants where contest_id = '${CONTEST}' and active`,
 );
+// F38: the generator may run on another machine (GENERATOR_HOST in the environment or .env).
+const genHost =
+  process.env.GENERATOR_HOST ??
+  (() => {
+    try {
+      return readFileSync(path.join(ROOT, '.env'), 'utf8')
+        .match(/^GENERATOR_HOST=(.+)$/m)?.[1]
+        .trim();
+    } catch {
+      return undefined;
+    }
+  })();
 try {
-  await fetch('http://localhost:4002/stop', { method: 'POST' }); // no generator traffic mixed in
+  await fetch(`http://${genHost || 'localhost'}:4002/stop`, { method: 'POST' }); // no generator traffic mixed in
 } catch {}
 const health = await fetch('http://localhost:4000/health').then(
   (r) => r.status,

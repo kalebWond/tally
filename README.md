@@ -146,6 +146,8 @@ pnpm check:health
 | http://localhost:3001 | Grafana (anonymous viewer) |
 | http://localhost:9090 | Prometheus |
 
+**Generator on a second machine:** run `pnpm generator:exe` and copy `tools/generator/bin/generator.exe` and `run-generator.cmd` to a Windows PC on the same network, where neither Docker nor Go is needed. Then set `COMPOSE_FILE=compose.yaml:compose.two-device.yaml` and `GENERATOR_HOST=<its address>` in `.env`, and run `docker compose --profile app up -d`. The generator panel drives the remote generator as before.
+
 Useful commands:
 
 | Command | Does |

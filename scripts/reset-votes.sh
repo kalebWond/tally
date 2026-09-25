@@ -47,6 +47,15 @@ if ((!yes)); then
   [ "$answer" = wipe ] || { echo "Nothing changed."; exit 1; }
 fi
 
+# A generator on another machine (F38, GENERATOR_HOST in .env) isn't a compose service here: stop
+# its run so it can't send votes into the wipe. The process stays up, idle.
+gen_host="${GENERATOR_HOST:-$(sed -n 's/^GENERATOR_HOST=//p' .env 2>/dev/null | tail -1)}"
+if [ -n "$gen_host" ]; then
+  curl -fsS -m 3 -X POST "http://$gen_host:4002/stop" >/dev/null 2>&1 &&
+    echo "stopped the generator's run on $gen_host" ||
+    echo "generator on $gen_host didn't answer; make sure it isn't sending votes" >&2
+fi
+
 # Stop everything that writes or serves votes, remembering what was running.
 running=()
 for svc in "${WRITERS[@]}"; do
