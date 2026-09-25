@@ -39,15 +39,31 @@ services:
       timeout: 5s
       retries: 20
 
-  # One-shot, idempotent: creates the topics (default profile, so host-run services get them too).
-  # 6 partitions caps the consumer group at 6 parallel instances; raising it later remaps keys.
+  # One-shot, idempotent: creates the topics (default profile, so host-run services get them too)
+  # with TOPIC_PARTITIONS partitions, and raises existing ones to it (F35). The count caps how many
+  # consumers can share a group. Partitions can be added, never removed. Votes are keyed by
+  # idempotency key, so nothing depends on which partition a vote lands on.
   topics:
     image: redpandadata/redpanda:v26.2.3
+    environment:
+      TOPIC_PARTITIONS: ${TOPIC_PARTITIONS:-24}
     entrypoint: ["/bin/sh", "-c"]
     command:
-      - >-
-        rpk topic create votes.raw votes.dead --if-not-exists -p 6 -r 1 -X brokers=redpanda:9092
-        && rpk topic describe votes.raw -p -X brokers=redpanda:9092
+      - |
+        set -eu
+        n="$$TOPIC_PARTITIONS"
+        case "$$n" in ''|*[!0-9]*|0) echo "TOPIC_PARTITIONS must be a positive integer, got '$$n'" >&2; exit 1 ;; esac
+        b="-X brokers=redpanda:9092"
+        rpk topic create votes.raw votes.dead --if-not-exists -p "$$n" -r 1 $$b
+        for t in votes.raw votes.dead; do
+          have=$$(rpk topic list $$b | awk -v t="$$t" '$$1 == t { print $$2 }')
+          if [ "$$have" -lt "$$n" ]; then
+            rpk topic add-partitions "$$t" -n $$((n - have)) $$b
+          elif [ "$$have" -gt "$$n" ]; then
+            echo "warning: $$t has $$have partitions, more than TOPIC_PARTITIONS=$$n; partitions can't be removed" >&2
+          fi
+        done
+        rpk topic list $$b
     depends_on:
       redpanda: { condition: service_healthy }
 
@@ -132,6 +148,7 @@ services:
     <<: *node-service
     depends_on:
       redpanda: { condition: service_healthy }
+      topics: { condition: service_completed_successfully }
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
       migrate: { condition: service_completed_successfully }

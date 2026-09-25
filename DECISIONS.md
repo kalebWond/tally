@@ -35,6 +35,10 @@ Where the build departs from `SPEC.md` or `IMPLEMENTATION_PLAN.md`, or pins down
 | Status label (plan F32) | FINAL becomes "Final results" | still "Final", on a gold plate; the footer already says these are the final results | F32 |
 | Build order (plan) | F33 deployment, then F34 README | F34 first, at the user's request; F33 adds the demo URL to the README | F34 |
 | Frame rate (plan F32) | the F31 60 fps check at 20,000 votes/s still passes | dropped: the generator is a mock, and performance targets apply to the data pipeline, not the frontend at its maximum rate | F32 |
+| Feature list (plan), sixth time | F33 deployment, F34 README, optional F35–F37 Kubernetes | new F35 partition votes evenly and F36 scale out counting, both built before F33; Kubernetes F37–F39. Earlier entries that mention the Kubernetes phase were updated | after F34 |
+| Partition key (SPEC §6, F4) | keyed by `code`, so a contestant's votes stay ordered on one partition | keyed by `idempotency_key` on both topics, spreading votes evenly | F35 |
+| Partition count (F4) | 6 on both topics, fixed in the `topics` job | `TOPIC_PARTITIONS` from the environment, default 24; the `topics` job raises existing topics to it | F35 |
+| Consumer in compose (F1) | one replica on host port 4003; Prometheus scrapes `consumer:4003` | planned: scalable with `--scale consumer=N`, no fixed host port; Prometheus finds replicas by DNS | F36 |
 | Voter hash (SPEC §5) | `SHA-256` of sender + salt | `HMAC-SHA256`, salt as the key, sender trimmed first | F3 |
 | Idempotency key (SPEC §6, plan F3) | ingest generates one (a UUID) | client `Idempotency-Key` header is honoured; ingest generates a UUID only when absent. Keys are 1–128 visible ASCII, not necessarily UUIDs | F3 |
 | `votes` constraints (SPEC §5) | FK only on `contestants.contest_id` | FKs also on `votes.contest_id`, `votes.contestant_id`, `vote_totals`, `vote_buckets` (no cascades). Contestants with votes can't be deleted, only deactivated | F2 |
@@ -251,6 +255,7 @@ None other. *Resolved (F13):* `apps/web`'s exit code 143 on SIGTERM was taken fo
 **Decided:** `votes.raw` and `votes.dead` have 6 partitions (replication 1 locally). Messages are keyed by the canonical code. `compatibilityPartitioner` places keys exactly where the Java client, rpk and franz-go would.
 **Why:** per-contestant ordering needs one partition per code. Standard hashing means placement can be verified with independent tooling. rpk producing the same keys gave the identical mapping: C1→3 C2→5 C3→3 C4→2 C5→0 C6→5 C7→2 C8→2 C9→2 C10→4. 6 partitions allows up to 6 consumers for the KEDA demo.
 **Observed:** with 10 codes the spread is uneven. Partition 2 holds four codes and partition 1 none. With keyed partitioning, a popular contestant makes a hot partition. That's the price of ordering, and it's worth saying out loud in the load-testing write-up.
+*Superseded (F35):* nothing turned out to need per-contestant order, so votes are keyed by `idempotency_key` instead. See "Plan — Partition votes evenly (F35) and scale out counting (F36)".
 
 ## F4 — Topics are created by an rpk init job, not by services
 
@@ -797,7 +802,7 @@ Headless Chrome, signed in, against "Tally Showcase" (closed, 980,508 votes). 12
 **Why:** after a long generator run is stopped, totals keep rising for a while as the queue drains, and nothing tells the operator or viewers how much is left, so they watch the numbers until they stop.
 **Decided:** the consumer measures its own lag every second (`getLag` in `@platformatic/kafka`: high watermark − committed offset per partition) and its rate, and writes them to a Redis hash `tally:backlog` that expires after 10 s. The gateway adds a `backlog` field to its frames, the generator status API adds it for `/control`, and both parse it with one `parseBacklog` in contracts. Shown on the generator panel (waiting, rate, time left) and as a counting line on results pages, per the user.
 - **Why lag is the right number:** offsets are committed only after a batch is in Postgres and Redis, so lag is exactly the votes accepted but not yet counted. It includes votes that will become dead letters, so the wording says "being counted".
-- **Several consumers:** each writes only its own partitions' fields and its own rate field, and readers sum them, so the figure stays right if the consumer is scaled out (F35–F37). The expiry makes it disappear when no consumer runs, which the panel shows as "Counting paused".
+- **Several consumers:** each writes only its own partitions' fields and its own rate field, and readers sum them, so the figure stays right if the consumer is scaled out (F36, and the Kubernetes phase, F37–F39). The expiry makes it disappear when no consumer runs, which the panel shows as "Counting paused".
 - **Redis rule:** the hash is derived from Redpanda and rewritten every second, so nothing exists only in Redis.
 - **Scope, system-wide, and two live contests:** `votes.raw` is partitioned by vote code, not by contest, so lag can't be split by contest without extra bookkeeping. With two contests live at once, both results pages show the same combined number. A contest that has closed can show "counting" while another contest's votes are still draining, even when all of its own votes are in. The results line says "queued votes", and its tooltip says the figure covers all live contests. The user accepted this, with the note.
 **Alternatives:** per-contest backlog (the consumer would track each contest's position in the queue; deferred until two simultaneous contests matter); reading Prometheus (optional, and can be stopped); a Kafka client in the gateway or web (the gateway is Redis-only by design, and web would carry a second Kafka client for one number).
@@ -862,7 +867,7 @@ Headless Chrome with its time zone set to `Africa/Addis_Ababa`, signed in, start
   - **Fix 2, caching number formatters.** Giving `AnimatedNumber` a decimals option made it call `toLocaleString` with options on every frame for every counter. With options, that call builds a new `Intl.NumberFormat` each time, about 660 a second; the old plain `toLocaleString('en')` is cached.
   - **Fix 3, moving the LIVE dot to a Web Animation.** Its speed is set through `updatePlaybackRate`, which keeps the phase. It runs on the compositor, not in a script every frame.
   - **Final measurement:** 0.2% of frames late over 24 s, p95 and p99 at 16.7–16.8 ms, no long tasks.
-  - **Why the figures moved so much:** late frames here follow machine load, not the board. A blank page under the same load drops nothing, and the board's late frames come in bursts while the stack ramps up. The consumer also rebuilds Redis from the whole vote log at every start (7.2 million votes by the end, most of them from these checks), so a check that restarts it slows everything for minutes. The check therefore measures first, 15 s after the generator starts.
+  - **Why the figures moved so much:** late frames here follow machine load, not the board. A blank page under the same load drops nothing, and the board's late frames come in bursts while the stack ramps up. The consumer also rebuilds Redis from the whole vote log at every start (7.2 million votes by the end, most of them from these checks), so a check that restarts it slows everything for minutes. *Corrected (after F34):* the startup rebuild (`resyncRedis`) reads `vote_totals` and `vote_buckets`, not the vote log. What made those restarts slow wasn't found. The check therefore measures first, 15 s after the generator starts.
 - **A reshuffle left the old draw clickable.** Its rows faded out under the new ones for 150 ms, keeping their inputs and "remove" buttons, so a quick click (the F27 check's) landed on a row that no longer existed. Each draw now replaces the table body at once, and the new rows still deal in. Rows leaving any table are inert and hidden from assistive tech while they fade (`PresenceRow`).
 - **A notice pushed the page down all at once.** A negative margin can't cancel a grid gap: a grid track doesn't shrink below zero. The page columns became flex columns, so notices open to their height. `scrollbar-gutter: stable` stops the nav shifting 8 px between a page that scrolls and one that doesn't.
 - **Not F31, found while checking:** the first sign-in after the web server boots logs React's "Connection closed" (#412) as the login page hands over. Next is warming up; a warm server logs nothing. Check browsers now start on a fresh profile: reused ones carried stale sessions.
@@ -988,3 +993,45 @@ Below that:
 - Diagrams as images: Mermaid stays editable and renders on GitHub.
 
 **Also:** the test data left from earlier checks was removed: the "F24 Grid Check" and "F26 Check" contests (6 contestants, no votes) and their Redis keys, and two recap renders from the F25 and F26 checks. The user's own contest was untouched.
+
+## Plan — Partition votes evenly (F35) and scale out counting (F36)
+**Context:** a discussion of running Tally for real traffic, with votes arriving from partner platforms instead of the generator. At 10,000 votes/s from the generator, the one consumer falls behind. Nothing is lost, and the totals catch up once the generator stops. So more counting capacity has to come from more consumers, and two things stand in the way:
+- **The partition key.** Votes are keyed by contestant code (F4), so a contestant's votes all go to one partition. With the ten seed codes, four share partition 2 and none lands on partition 1. Extra consumers get uneven shares, and a popular contestant loads a single partition and a single consumer.
+- **The compose file.** The consumer publishes a fixed host port, so a second replica can't start, and Prometheus scrapes a single address.
+
+**Decided:**
+- **Key both topics by `idempotency_key`.** Every vote has a different key, so `murmur2(key) mod n` spreads them evenly: 600,000 random keys over 6 partitions came out within half a percent of a sixth each. This supersedes F4's key.
+- **Partitions from `TOPIC_PARTITIONS`, default 24.** It divides evenly among 1, 2, 3, 4, 6, 8 or 12 consumers. Partitions can be added but never removed, and `pnpm reset:votes` recreates the topics through the `topics` job, so the count belongs in configuration, not in a one-off `rpk` command.
+- **Split in two, at the user's request.** F35 is only the key and the partition count. With one consumer, batches are processed and committed one at a time, so no two transactions update the same rows at once: nothing else has to change. F36 adds the consumers and what they need.
+- **F36: upsert rows in a fixed order.** With code keys, no two consumers touched the same contestant's row. With spread keys, every batch updates every contestant's `vote_totals` and `vote_buckets` rows, in the order its votes arrived. Two consumers could then lock C1 and C2 in opposite orders and deadlock. Postgres would abort one, and the retry would count it correctly, but slowly. Sorting the rows by contestant first means the locks are always taken in the same order.
+- **F36: a scalable consumer in compose.** No fixed host port, Prometheus DNS service discovery, and the health check runs inside the container.
+
+**Why the order F4 bought isn't needed:**
+- **Totals are sums.** Postgres updates a contestant's row under its row lock, so concurrent batches take turns.
+- **Redis only accepts a higher total** (`SET_IF_HIGHER`), so a slower consumer can't move a count backwards.
+- **Closing goes by acceptance time** (`sent_at` against `closes_at`, F16), not by queue order.
+- **Already safe with several consumers:** the backlog (F29) and the startup resync (F17) were written for more than one consumer.
+
+**Alternatives:**
+- **Keep code keys:** per-contestant order, which nothing uses, at the cost of uneven load.
+- **No key (round robin):** it spreads too, but a retried publish can land on another partition. With the idempotency key, a retry lands on the same one.
+- **48 partitions:** it works, but it buys headroom that nothing here needs. One consumer on the laptop already manages somewhere between 3,000 and 10,000 votes/s.
+
+**The next limit:** with the votes spread, every consumer updates the same few `vote_totals` rows. Each batch already sums its votes per contestant first, so that's one update per contestant per batch. That's fine for a handful of consumers. Beyond that, the fix is one totals row per consumer, summed on read, and only if a measurement shows the contention.
+
+## F35 — How the done-when was verified
+Against the full `app` stack on the laptop, on 2026-09-25.
+- **Raising existing topics:** the stack had been stopped with 6-partition topics. `docker compose --profile app up -d --build` ran the new `topics` job, which found both topics at 6 and added 18 partitions to each.
+- **Creating them:** `pnpm reset:votes --yes` (at the user's request: all votes wiped, contests and contestants kept) deleted the topics, and the job recreated them at 24.
+- **Groups:** `tally-consumer` owned all 24 partitions of `votes.raw`, and `tally-analytics` all 24 of both topics.
+- **Spread:** a generator run on Tally Showcase at 3,000 votes/s for 40 s, with 3% invalid codes.
+  - `votes.raw` held 120,084 messages, 4,902 to 5,196 per partition, within −2.0% and +3.8% of the mean.
+  - `votes.dead` held 3,660, from 131 to 180 per partition. That's wider, but with about 150 each the noise alone is around ±8%.
+- **Counts:**
+  - generator: 120,084 accepted, 0 failed, ingest p95 14 ms
+  - Postgres: 116,424 votes and 3,660 dead letters, summing to 120,084
+  - ClickHouse: 120,084 distinct keys
+  - both groups at zero lag afterwards; `pnpm reconcile` found no drift
+- **Tests:** the ingest publisher test now checks three things. Votes are keyed by idempotency key. A leader with 120 votes lands on every partition. A retry with the same key, from a second publisher, lands on the same partition. The dead-letter test checks the new key, including a malformed message's `offset:` key. The ingest and consumer suites pass (71 tests), as do lint and typecheck.
+- **Afterwards:** the test votes were wiped with `pnpm reset:votes --yes`, and Showcase is closed again.
+

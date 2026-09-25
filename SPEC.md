@@ -173,9 +173,11 @@ tally:idem:{key}                  string  TTL 1h, redelivery guard
 
 ## 6. Event Schema
 
-Topic `votes.raw`, partitioned by `code` so all votes for one contestant stay ordered on one partition.
+Topic `votes.raw`, ~~partitioned by `code` so all votes for one contestant stay ordered on one partition~~ *Changed (F35):* partitioned by `idempotency_key`, so votes spread evenly.
 
 *Decided (F4):* 6 partitions on both topics, Java-compatible murmur2 key hashing, and topics created by a one-shot `rpk` init job (services never auto-create them). *Decided (F3):* `code` is trimmed and uppercased at ingest and must match `^[A-Z0-9]{1,16}$`. `sent_at` is the time ingest accepted the vote. `idempotency_key` is the client's `Idempotency-Key` header when sent, otherwise a generated UUID.
+
+*Changed (F35):* both topics are keyed by `idempotency_key`, not `code`, so votes spread evenly over the partitions whoever is winning, and consumers can be added. The partition count comes from `TOPIC_PARTITIONS` (default 24); the `topics` job raises existing topics to it. Nothing depends on per-contestant order: totals are sums, Redis only accepts higher totals, and closing goes by acceptance time.
 
 ```json
 {
@@ -227,7 +229,7 @@ Only changed contestants are sent after the initial snapshot.
 
 *Changed (F17):* snapshots and updates also carry `minutes` (`{ minute, count }`, the contest's votes per minute: the whole 30-minute window in a snapshot, changed minutes in an update) and `minutesTo` (the window's last minute).
 
-*Changed (F29):* snapshots and updates also carry `backlog`: `{ pending, perSec, etaSec }`, the votes accepted but not yet counted **across all contests** (the queue is partitioned by code, not contest), or null when no consumer is reporting; a backlog change alone sends an update.
+*Changed (F29):* snapshots and updates also carry `backlog`: `{ pending, perSec, etaSec }`, the votes accepted but not yet counted **across all contests** (the queue isn't partitioned by contest), or null when no consumer is reporting; a backlog change alone sends an update.
 
 *Changed (F16):* snapshots and updates also carry `status` (the contest's status, or null when Redis doesn't have it); a status change alone sends an update.
 

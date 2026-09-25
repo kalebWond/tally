@@ -52,7 +52,7 @@ sequenceDiagram
   participant B as Browser
   S->>I: POST /votes {contestId, code, sender}
   I->>I: validate, HMAC the sender
-  I->>Q: publish, keyed by contestant code
+  I->>Q: publish, keyed by idempotency key
   Q-->>I: acknowledged by all in-sync replicas
   I-->>S: 202 Accepted
   Q->>C: batch
@@ -121,7 +121,7 @@ The full record, with the alternatives considered each time, is [`DECISIONS.md`]
 - **Postgres is the truth, Redis is speed.** Nothing lives in Redis that Postgres can't rebuild, and the consumer rebuilds it at every start. The cost is a start-up of minutes once the vote log holds millions of votes. The gain is that no failure can leave the live totals permanently wrong. (F5, F17)
 - **Duplicates are caught in one place.** Postgres's unique idempotency key is the only dedupe, and Redis only receives absolute totals, never increments. So at-least-once delivery counts each vote exactly once, and a replay can't drift the board. (F5)
 - **`202` means the broker has it.** The producer waits for all in-sync replicas (`acks=all`) and is idempotent; 5 ms micro-batches keep that cheap. A slower broker makes ingest slower, but a `202` is never a promise the queue can't keep. (F4)
-- **Keyed by contestant code** with Java-compatible murmur2, so partitions match Redpanda's own tools, and each contestant's votes stay in order. (F4)
+- **Keyed by idempotency key, over 24 partitions.** Votes spread evenly whoever is winning, so a popular contestant can't load a single partition, and a retry lands where the first try did. Keying by contestant code (F4) kept each contestant's votes in order, which nothing needed, and put four of the ten codes on one partition. Java-compatible murmur2, so placement matches Redpanda's own tools. (F4, F35)
 - **Dead letters are first-class.** Every rejection has a reason, lands in a Postgres table and a topic, and is browsable in the admin. (F5, F6, F15)
 - **The gateway sends absolute totals: a snapshot, then diffs.** A missed frame is healed by the next one, and a reconnect resyncs without a page refresh. It makes one Redis poll per watched contest, independent of audience size. (F7, F11)
 - **Closing is by acceptance time, under a lock.** A vote counts if ingest accepted it before the close, even if it's still queued. A lock handshake means no vote is half-counted at the cut-off. (F16)

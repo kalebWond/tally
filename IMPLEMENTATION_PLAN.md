@@ -463,9 +463,43 @@ The clip and stills (`docs/media`) were recorded from Tally Showcase with headle
 
 ---
 
-## Optional: F35–F37 — Kubernetes
+## F35 — Partition votes evenly
 
-*Renumbered:* was F28–F30, then F31–F33, then F32–F34, then F33–F35, then F34–F36.
+*Added (after F34):* from a discussion of running Tally for real traffic. At 10,000 votes/s from the generator, the one consumer falls behind: nothing is lost, and the totals catch up after the generator stops. More counting capacity means more consumers (F36), and the topics have to be ready for them first:
+- **Keyed by contestant code:** a contestant's votes all land on one partition. With the ten seed codes, partition 2 holds four codes and partition 1 none, so extra consumers would get uneven shares, and a popular contestant loads a single partition.
+- **6 partitions:** at most 6 consumers can share the work.
+
+Built before F33, like F34, so the deployment starts with the scalable shape. With one consumer it doesn't make counting faster; F36 does. The optional Kubernetes phase moved from F35–F37 to F37–F39.
+
+**Build:**
+- **Partition key:** ingest keys `votes.raw` by the vote's `idempotency_key` instead of its code. The consumer keys `votes.dead` by the same key.
+- **Partition count:** the `topics` job creates both topics with `TOPIC_PARTITIONS` partitions from the environment, default 24, and raises existing topics to it. `pnpm reset:votes` recreates the topics through the same job. The consumer waits for the job.
+
+**Done when:** both topics have 24 partitions, and both consumer groups own all 24. After a generator run, each partition holds about 1/24 of the votes. Every accepted vote is counted exactly once, and `pnpm reconcile` finds no drift.
+
+*Decided (F35):* as planned.
+- The `topics` job also refuses a `TOPIC_PARTITIONS` that isn't a positive integer, and warns when a topic already has more partitions than asked for.
+- Malformed dead letters, keyless before, now carry their `offset:` key.
+- The consumer now waits for the `topics` job, as ingest and analytics already did.
+- Verified at 3,000 votes/s: every partition within 4% of the mean, 120,084 accepted and 120,084 counted or dead-lettered, no drift. The details are in `DECISIONS.md`.
+
+---
+
+## F36 — Scale out counting
+
+*Added (after F34):* with votes spread evenly (F35), more consumers can share the counting.
+
+**Build:**
+- **Consumer in compose:** no fixed host port, so `docker compose --profile app up -d --scale consumer=N` works. Prometheus finds every replica through DNS service discovery. `check-health.sh` checks the consumer inside its container.
+- **Lock order:** the consumer sorts each batch's `vote_totals` and `vote_buckets` rows by contestant before upserting. With spread keys, several consumers update the same rows, and rows taken in arrival order can deadlock. One consumer processes one batch at a time, so this only matters from F36 on.
+
+**Done when:** at 10,000 votes/s, three consumers each own an even share of the partitions and drain the backlog faster than one does. Every accepted vote is counted exactly once, and `pnpm reconcile` finds no drift.
+
+---
+
+## Optional: F37–F39 — Kubernetes
+
+*Renumbered:* was F28–F30, then F31–F33, then F32–F34, then F33–F35, then F34–F36, then F35–F37, then F37–F39 (F35 and F36 were added).
 
 **Prerequisites already satisfied:** environment-variable config, no local disk state, health endpoints, graceful SIGTERM.
 
@@ -487,6 +521,8 @@ The clip and stills (`docs/media`) were recorded from Tally Showcase with headle
 | 28–32 | F26–F30 | Run a whole contest from the browser |
 | 33 | F31 | Lively UI |
 | 34 | F32 | Stage look |
-| 35–36 | F33–F34 | Deployed and written up |
+| 35 | F34 | Written up |
+| 36 | F35–F36 | Counting scales out |
+| 37 | F33 | Deployed |
 
 Stopping after session 13 already leaves you with something worth showing.
