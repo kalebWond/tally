@@ -38,7 +38,9 @@ Where the build departs from `SPEC.md` or `IMPLEMENTATION_PLAN.md`, or pins down
 | Feature list (plan), sixth time | F33 deployment, F34 README, optional F35–F37 Kubernetes | new F35 partition votes evenly and F36 scale out counting, both built before F33; Kubernetes F37–F39. Earlier entries that mention the Kubernetes phase were updated | after F34 |
 | Partition key (SPEC §6, F4) | keyed by `code`, so a contestant's votes stay ordered on one partition | keyed by `idempotency_key` on both topics, spreading votes evenly | F35 |
 | Partition count (F4) | 6 on both topics, fixed in the `topics` job | `TOPIC_PARTITIONS` from the environment, default 24; the `topics` job raises existing topics to it | F35 |
-| Consumer in compose (F1) | one replica on host port 4003; Prometheus scrapes `consumer:4003` | planned: scalable with `--scale consumer=N`, no fixed host port; Prometheus finds replicas by DNS | F36 |
+| Consumer in compose (F1) | one replica on host port 4003; Prometheus scrapes `consumer:4003` | planned: scalable with `--scale consumer=N`, no fixed host port; Prometheus finds replicas by DNS | F37 |
+| Feature list (plan), seventh time | F36 scale out counting, optional F37–F39 Kubernetes | new F36 ingest replicas; scale out counting is now F37, Kubernetes F38–F40 | after F35 |
+| Ingest in compose (F1, F4) | one container on host port 4000 | `INGEST_REPLICAS` replicas (default 1) behind nginx (`ingest-proxy`), which takes port 4000; the generator and k6 call the proxy; Prometheus finds replicas by DNS | F36 |
 | Voter hash (SPEC §5) | `SHA-256` of sender + salt | `HMAC-SHA256`, salt as the key, sender trimmed first | F3 |
 | Idempotency key (SPEC §6, plan F3) | ingest generates one (a UUID) | client `Idempotency-Key` header is honoured; ingest generates a UUID only when absent. Keys are 1–128 visible ASCII, not necessarily UUIDs | F3 |
 | `votes` constraints (SPEC §5) | FK only on `contestants.contest_id` | FKs also on `votes.contest_id`, `votes.contestant_id`, `vote_totals`, `vote_buckets` (no cascades). Contestants with votes can't be deleted, only deactivated | F2 |
@@ -255,7 +257,7 @@ None other. *Resolved (F13):* `apps/web`'s exit code 143 on SIGTERM was taken fo
 **Decided:** `votes.raw` and `votes.dead` have 6 partitions (replication 1 locally). Messages are keyed by the canonical code. `compatibilityPartitioner` places keys exactly where the Java client, rpk and franz-go would.
 **Why:** per-contestant ordering needs one partition per code. Standard hashing means placement can be verified with independent tooling. rpk producing the same keys gave the identical mapping: C1→3 C2→5 C3→3 C4→2 C5→0 C6→5 C7→2 C8→2 C9→2 C10→4. 6 partitions allows up to 6 consumers for the KEDA demo.
 **Observed:** with 10 codes the spread is uneven. Partition 2 holds four codes and partition 1 none. With keyed partitioning, a popular contestant makes a hot partition. That's the price of ordering, and it's worth saying out loud in the load-testing write-up.
-*Superseded (F35):* nothing turned out to need per-contestant order, so votes are keyed by `idempotency_key` instead. See "Plan — Partition votes evenly (F35) and scale out counting (F36)".
+*Superseded (F35):* nothing turned out to need per-contestant order, so votes are keyed by `idempotency_key` instead. See "Plan — Partition votes evenly (F35) and scale out counting (F37, was F36)".
 
 ## F4 — Topics are created by an rpk init job, not by services
 
@@ -802,7 +804,7 @@ Headless Chrome, signed in, against "Tally Showcase" (closed, 980,508 votes). 12
 **Why:** after a long generator run is stopped, totals keep rising for a while as the queue drains, and nothing tells the operator or viewers how much is left, so they watch the numbers until they stop.
 **Decided:** the consumer measures its own lag every second (`getLag` in `@platformatic/kafka`: high watermark − committed offset per partition) and its rate, and writes them to a Redis hash `tally:backlog` that expires after 10 s. The gateway adds a `backlog` field to its frames, the generator status API adds it for `/control`, and both parse it with one `parseBacklog` in contracts. Shown on the generator panel (waiting, rate, time left) and as a counting line on results pages, per the user.
 - **Why lag is the right number:** offsets are committed only after a batch is in Postgres and Redis, so lag is exactly the votes accepted but not yet counted. It includes votes that will become dead letters, so the wording says "being counted".
-- **Several consumers:** each writes only its own partitions' fields and its own rate field, and readers sum them, so the figure stays right if the consumer is scaled out (F36, and the Kubernetes phase, F37–F39). The expiry makes it disappear when no consumer runs, which the panel shows as "Counting paused".
+- **Several consumers:** each writes only its own partitions' fields and its own rate field, and readers sum them, so the figure stays right if the consumer is scaled out (F37, and the Kubernetes phase, F38–F40). The expiry makes it disappear when no consumer runs, which the panel shows as "Counting paused".
 - **Redis rule:** the hash is derived from Redpanda and rewritten every second, so nothing exists only in Redis.
 - **Scope, system-wide, and two live contests:** `votes.raw` is partitioned by vote code, not by contest, so lag can't be split by contest without extra bookkeeping. With two contests live at once, both results pages show the same combined number. A contest that has closed can show "counting" while another contest's votes are still draining, even when all of its own votes are in. The results line says "queued votes", and its tooltip says the figure covers all live contests. The user accepted this, with the note.
 **Alternatives:** per-contest backlog (the consumer would track each contest's position in the queue; deferred until two simultaneous contests matter); reading Prometheus (optional, and can be stopped); a Kafka client in the gateway or web (the gateway is Redis-only by design, and web would carry a second Kafka client for one number).
@@ -994,7 +996,7 @@ Below that:
 
 **Also:** the test data left from earlier checks was removed: the "F24 Grid Check" and "F26 Check" contests (6 contestants, no votes) and their Redis keys, and two recap renders from the F25 and F26 checks. The user's own contest was untouched.
 
-## Plan — Partition votes evenly (F35) and scale out counting (F36)
+## Plan — Partition votes evenly (F35) and scale out counting (F37, was F36)
 **Context:** a discussion of running Tally for real traffic, with votes arriving from partner platforms instead of the generator. At 10,000 votes/s from the generator, the one consumer falls behind. Nothing is lost, and the totals catch up once the generator stops. So more counting capacity has to come from more consumers, and two things stand in the way:
 - **The partition key.** Votes are keyed by contestant code (F4), so a contestant's votes all go to one partition. With the ten seed codes, four share partition 2 and none lands on partition 1. Extra consumers get uneven shares, and a popular contestant loads a single partition and a single consumer.
 - **The compose file.** The consumer publishes a fixed host port, so a second replica can't start, and Prometheus scrapes a single address.
@@ -1002,9 +1004,9 @@ Below that:
 **Decided:**
 - **Key both topics by `idempotency_key`.** Every vote has a different key, so `murmur2(key) mod n` spreads them evenly: 600,000 random keys over 6 partitions came out within half a percent of a sixth each. This supersedes F4's key.
 - **Partitions from `TOPIC_PARTITIONS`, default 24.** It divides evenly among 1, 2, 3, 4, 6, 8 or 12 consumers. Partitions can be added but never removed, and `pnpm reset:votes` recreates the topics through the `topics` job, so the count belongs in configuration, not in a one-off `rpk` command.
-- **Split in two, at the user's request.** F35 is only the key and the partition count. With one consumer, batches are processed and committed one at a time, so no two transactions update the same rows at once: nothing else has to change. F36 adds the consumers and what they need.
-- **F36: upsert rows in a fixed order.** With code keys, no two consumers touched the same contestant's row. With spread keys, every batch updates every contestant's `vote_totals` and `vote_buckets` rows, in the order its votes arrived. Two consumers could then lock C1 and C2 in opposite orders and deadlock. Postgres would abort one, and the retry would count it correctly, but slowly. Sorting the rows by contestant first means the locks are always taken in the same order.
-- **F36: a scalable consumer in compose.** No fixed host port, Prometheus DNS service discovery, and the health check runs inside the container.
+- **Split in two, at the user's request.** F35 is only the key and the partition count. With one consumer, batches are processed and committed one at a time, so no two transactions update the same rows at once: nothing else has to change. F37 (was F36) adds the consumers and what they need.
+- **F37: upsert rows in a fixed order.** With code keys, no two consumers touched the same contestant's row. With spread keys, every batch updates every contestant's `vote_totals` and `vote_buckets` rows, in the order its votes arrived. Two consumers could then lock C1 and C2 in opposite orders and deadlock. Postgres would abort one, and the retry would count it correctly, but slowly. Sorting the rows by contestant first means the locks are always taken in the same order.
+- **F37: a scalable consumer in compose.** No fixed host port, Prometheus DNS service discovery, and the health check runs inside the container.
 
 **Why the order F4 bought isn't needed:**
 - **Totals are sums.** Postgres updates a contestant's row under its row lock, so concurrent batches take turns.
@@ -1034,4 +1036,40 @@ Against the full `app` stack on the laptop, on 2026-09-25.
   - both groups at zero lag afterwards; `pnpm reconcile` found no drift
 - **Tests:** the ingest publisher test now checks three things. Votes are keyed by idempotency key. A leader with 120 votes lands on every partition. A retry with the same key, from a second publisher, lands on the same partition. The dead-letter test checks the new key, including a malformed message's `offset:` key. The ingest and consumer suites pass (71 tests), as do lint and typecheck.
 - **Afterwards:** the test votes were wiped with `pnpm reset:votes --yes`, and Showcase is closed again.
+
+## F36 — Ingest replicas behind nginx
+**Context:** a peak measurement (`load-results/consumer-peak.md`) pushed the generator's maximum, 20,000 votes/s, at the full stack.
+- **Ingest was the first limit:** one full thread at about 4,200/s.
+- **The consumer came second:** about 4,000/s with the laptop loaded, 6,000/s without.
+- **Shared rows barely matter:** the consumer holds them locked for about 5% of each batch, so contention among several consumers would bite only at around 80,000/s.
+- **Disk stalls:** twice, counting nearly stopped while COMMIT waited on the disk (`IO:WalSync`). Postgres, Redpanda and ClickHouse share the laptop's SSD.
+- **F35 exonerated:** a lead from one earlier sample, that F35 made ingest 2.4× costlier per vote, didn't survive a controlled run at 6 partitions. The consumer was the same at either count, and ingest was at most about 9% cheaper at 6.
+
+**Decided:**
+- **Replicas:** ingest runs as `INGEST_REPLICAS` replicas (default 1) behind `ingest-proxy`, which takes port 4000. The replicas publish no host port, so `--scale` works.
+- **nginx 1.30.5 as the proxy** (`infra/nginx/ingest.conf`):
+  - `server ingest:4000 resolve` re-reads the replicas from Docker's DNS every 5 s, so scaling needs no reload.
+  - Connections to the replicas stay open.
+  - 2 worker processes.
+  - A replica that refuses the connection is skipped. POST isn't retried once sent, since ingest may already have published the vote, and a client's retry is safe through its `Idempotency-Key`.
+- **Clients:** the generator and k6 call the proxy.
+- **Prometheus:** discovers the replicas through DNS (`dns_sd_configs`). The dashboard already sums ingest's metrics across instances.
+
+**Alternatives:**
+- **Docker's DNS alone:** clients keep their connections open, so each one would stick to one replica.
+- **Node's `cluster` in one container:** it uses more cores without a proxy, but hides the replicas from metrics, and it isn't how Kubernetes or a cloud host scales.
+- **A batch endpoint (`POST /votes/batch`):** it may cut the per-request cost a lot, but it changes the public contract, and ingest hasn't been profiled to show that the cost is per-request. It stays a later option.
+- **Caddy or Traefik:** they would do the same. nginx is the most familiar, and its `resolve` option (open source since 1.27.3) covers dynamic replicas.
+
+**Why no code changed:** ingest is stateless. Dedupe is the consumer's unique key, each replica's producer has its own ID from Redpanda, and every replica reads the same salt from the environment. It was built for this, and scaling it is configuration only.
+
+## F36 — How the done-when was verified
+Details and tables are in `load-results/ingest-replicas.md`.
+- **Method:** both consumers were stopped. The generator ran for 90 s at 20,000/s asked, at each of 1, 2 and 3 replicas (`--scale ingest=N`).
+- **Accepted:** 6,565, 7,214 and 8,263 votes/s (+10% and +26%), with 0 failures.
+- **Spread:** nginx spread the load evenly, with each replica at about one full thread.
+- **Why the gain was modest:** at 3 replicas the containers used 5.4 of 8 logical threads on the laptop's 4 physical cores, and each replica's throughput fell from 6,565/s alone to about 2,750/s. The generator (1.4 threads) and nginx (0.8) compete for the same cores. The real scaling needs the generator on another machine, or a real host.
+- **Counts:** after the drain (293 s, one consumer), 1,983,844 accepted = 1,983,844 in Postgres = 1,983,844 in ClickHouse, with no dead letters. `pnpm reconcile` found no drift.
+- **Found on the way:** Prometheus reads its config only at startup. During the runs it still scraped the old single `ingest:4000` target, so the figures came from the generator and Postgres instead. After a restart it found all three replicas. The note is in CLAUDE.md.
+- **Afterwards:** the test votes were wiped with `pnpm reset:votes --yes`, which also scaled ingest back to 1 replica. Showcase is closed. Lint and the health check pass.
 

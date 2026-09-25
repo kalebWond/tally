@@ -14,11 +14,11 @@ const ROOT = path.join(import.meta.dirname, '..');
 const PROFILE = process.argv[2] ?? 'smoke';
 const K6_IMAGE = 'grafana/k6:2.3.0';
 const CONTEST = process.env.CONTEST_ID ?? '0192f3a0-7c1e-7000-8000-00000000c0de';
-// k6 runs inside the compose network and calls ingest by service name: going through the
+// k6 runs inside the compose network and calls the ingest proxy (F36) by service name: going through the
 // host's published port adds docker-proxy, a userspace copy of every request, which at
 // 3,000 req/s costs CPU and latency that a real deployment wouldn't have.
 const NETWORK = process.env.COMPOSE_NETWORK ?? 'tally_default';
-const INGEST = process.env.INGEST_URL ?? 'http://ingest:4000';
+const INGEST = process.env.INGEST_URL ?? 'http://ingest-proxy:4000';
 const OUT = path.join(ROOT, 'load-results');
 
 if (!['smoke', 'steady', 'spike'].includes(PROFILE)) {

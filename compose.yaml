@@ -137,6 +137,21 @@ services:
       redpanda: { condition: service_healthy }
       topics: { condition: service_completed_successfully }
     build: { context: ., dockerfile: services/ingest/Dockerfile }
+    # F36: several replicas behind ingest-proxy, which owns port 4000. No host port here, so they
+    # can scale: INGEST_REPLICAS=3 docker compose --profile app up -d (or --scale ingest=3).
+    deploy:
+      replicas: ${INGEST_REPLICAS:-1}
+
+  # F36: the one entry point for votes. Spreads requests over the ingest replicas, as the host's
+  # load balancer would in production.
+  ingest-proxy:
+    profiles: [app]
+    image: nginx:1.30.5-alpine
+    restart: unless-stopped
+    volumes:
+      - ./infra/nginx/ingest.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      ingest: { condition: service_started }
     ports: ["4000:4000"]
 
   gateway:
@@ -248,9 +263,9 @@ services:
     build: { context: tools/generator }
     ports: ["4002:4002"]
     environment:
-      INGEST_URL: http://ingest:4000
+      INGEST_URL: http://ingest-proxy:4000
     depends_on:
-      ingest: { condition: service_started }
+      ingest-proxy: { condition: service_started }
 
 volumes:
   clickhouse-data:

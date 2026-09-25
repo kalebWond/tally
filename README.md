@@ -65,7 +65,7 @@ sequenceDiagram
 
 | Service | Role |
 |---|---|
-| `services/ingest` | Fastify. Validate, hash the sender, publish, return `202`. Thin on purpose. |
+| `services/ingest` | Fastify. Validate, hash the sender, publish, return `202`. Thin on purpose, so it runs as several replicas behind nginx (`INGEST_REPLICAS`). |
 | `services/consumer` | Resolves codes, dedupes, and writes votes, totals and per-minute buckets to Postgres and absolute totals to Redis. Rebuilds Redis from Postgres at startup. |
 | `services/gateway` | WebSocket fan-out: a snapshot on connect, then diffs. One Redis poll per watched contest, however many viewers. |
 | `services/analytics-consumer` | Copies both topics into ClickHouse, rows as delivered. |

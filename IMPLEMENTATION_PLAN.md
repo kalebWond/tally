@@ -485,21 +485,41 @@ Built before F33, like F34, so the deployment starts with the scalable shape. Wi
 
 ---
 
-## F36 — Scale out counting
+## F36 — Ingest replicas
 
-*Added (after F34):* with votes spread evenly (F35), more consumers can share the counting.
+*Added (after F35):* a peak measurement (`load-results/consumer-peak.md`) found ingest to be the first limit. It ran on one full core at about 4,200 votes/s while the generator asked for 20,000. Ingest keeps no state, so it can run as several replicas with something in front to spread the requests.
+
+**Build:**
+- **Proxy:** nginx in the `app` profile takes port 4000 and spreads each request over every ingest replica. It re-resolves the replicas through Docker's DNS, so scaling needs no reload, and keeps connections to them open. In production, the host's load balancer does this job.
+- **Replicas:** `INGEST_REPLICAS` sets the count (default 1). Replicas publish no host port.
+- **Clients:** the generator and k6 call the proxy.
+- **Metrics:** Prometheus finds every replica through DNS.
+- **No change to ingest's code.**
+
+**Done when:** with the consumers stopped during the load, 2 and 3 replicas accept clearly more than 1 at the generator's 20,000/s, with no failures. Afterwards the consumers drain the backlog, every accepted vote is counted exactly once, and `pnpm reconcile` finds no drift.
+
+*Decided (F36):* as planned. nginx 1.30.5 (`ingest-proxy`, `infra/nginx/ingest.conf`) runs 2 workers, keeps connections to the replicas open, and re-resolves them every 5 s.
+- **Result:** 1, 2 and 3 replicas accepted 6,565, 7,214 and 8,263 votes/s, with no failures. All 1,983,844 votes were counted exactly once, with no drift.
+- **What limits it:** each replica ran at a full thread, but on the laptop's 4 cores the generator (1.4 threads), nginx (0.8) and the replicas compete, so the gain is modest.
+- Details in `load-results/ingest-replicas.md`.
+
+---
+
+## F37 — Scale out counting
+
+*Added (after F34):* with votes spread evenly (F35), more consumers can share the counting. *Renumbered:* was F36.
 
 **Build:**
 - **Consumer in compose:** no fixed host port, so `docker compose --profile app up -d --scale consumer=N` works. Prometheus finds every replica through DNS service discovery. `check-health.sh` checks the consumer inside its container.
-- **Lock order:** the consumer sorts each batch's `vote_totals` and `vote_buckets` rows by contestant before upserting. With spread keys, several consumers update the same rows, and rows taken in arrival order can deadlock. One consumer processes one batch at a time, so this only matters from F36 on.
+- **Lock order:** the consumer sorts each batch's `vote_totals` and `vote_buckets` rows by contestant before upserting. With spread keys, several consumers update the same rows, and rows taken in arrival order can deadlock. One consumer processes one batch at a time, so this only matters from F37 on.
 
 **Done when:** at 10,000 votes/s, three consumers each own an even share of the partitions and drain the backlog faster than one does. Every accepted vote is counted exactly once, and `pnpm reconcile` finds no drift.
 
 ---
 
-## Optional: F37–F39 — Kubernetes
+## Optional: F38–F40 — Kubernetes
 
-*Renumbered:* was F28–F30, then F31–F33, then F32–F34, then F33–F35, then F34–F36, then F35–F37, then F37–F39 (F35 and F36 were added).
+*Renumbered:* was F28–F30, then F31–F33, then F32–F34, then F33–F35, then F34–F36, then F35–F37, then F37–F39 (F35 and F36 were added), then F38–F40 (F36 ingest replicas was added).
 
 **Prerequisites already satisfied:** environment-variable config, no local disk state, health endpoints, graceful SIGTERM.
 
@@ -522,7 +542,7 @@ Built before F33, like F34, so the deployment starts with the scalable shape. Wi
 | 33 | F31 | Lively UI |
 | 34 | F32 | Stage look |
 | 35 | F34 | Written up |
-| 36 | F35–F36 | Counting scales out |
+| 36 | F35–F37 | Ingest and counting scale out |
 | 37 | F33 | Deployed |
 
 Stopping after session 13 already leaves you with something worth showing.
