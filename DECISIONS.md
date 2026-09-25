@@ -38,7 +38,7 @@ Where the build departs from `SPEC.md` or `IMPLEMENTATION_PLAN.md`, or pins down
 | Feature list (plan), sixth time | F33 deployment, F34 README, optional F35–F37 Kubernetes | new F35 partition votes evenly and F36 scale out counting, both built before F33; Kubernetes F37–F39. Earlier entries that mention the Kubernetes phase were updated | after F34 |
 | Partition key (SPEC §6, F4) | keyed by `code`, so a contestant's votes stay ordered on one partition | keyed by `idempotency_key` on both topics, spreading votes evenly | F35 |
 | Partition count (F4) | 6 on both topics, fixed in the `topics` job | `TOPIC_PARTITIONS` from the environment, default 24; the `topics` job raises existing topics to it | F35 |
-| Consumer in compose (F1) | one replica on host port 4003; Prometheus scrapes `consumer:4003` | planned: scalable with `--scale consumer=N`, no fixed host port; Prometheus finds replicas by DNS | F37 |
+| Consumer in compose (F1) | one replica on host port 4003; Prometheus scrapes `consumer:4003` | `CONSUMER_REPLICAS` replicas (default 1), no host port; Prometheus finds them by DNS; the health check reaches each inside its container | F37 |
 | Feature list (plan), seventh time | F36 scale out counting, optional F37–F39 Kubernetes | new F36 ingest replicas; scale out counting is now F37, Kubernetes F38–F40 | after F35 |
 | Ingest in compose (F1, F4) | one container on host port 4000 | `INGEST_REPLICAS` replicas (default 1) behind nginx (`ingest-proxy`), which takes port 4000; the generator and k6 call the proxy; Prometheus finds replicas by DNS | F36 |
 | Voter hash (SPEC §5) | `SHA-256` of sender + salt | `HMAC-SHA256`, salt as the key, sender trimmed first | F3 |
@@ -1072,4 +1072,30 @@ Details and tables are in `load-results/ingest-replicas.md`.
 - **Counts:** after the drain (293 s, one consumer), 1,983,844 accepted = 1,983,844 in Postgres = 1,983,844 in ClickHouse, with no dead letters. `pnpm reconcile` found no drift.
 - **Found on the way:** Prometheus reads its config only at startup. During the runs it still scraped the old single `ingest:4000` target, so the figures came from the generator and Postgres instead. After a restart it found all three replicas. The note is in CLAUDE.md.
 - **Afterwards:** the test votes were wiped with `pnpm reset:votes --yes`, which also scaled ingest back to 1 replica. Showcase is closed. Lint and the health check pass.
+
+## F37 — Scale out counting: what building it turned up
+**Decided:** as planned in "Plan — Partition votes evenly (F35) and scale out counting (F37, was F36)".
+- `CONSUMER_REPLICAS` replicas (default 1), no host port.
+- Prometheus discovers them through DNS.
+- `check-health.sh` checks each replica with `docker compose exec --index N`, running Node's `fetch` inside it.
+- `processBatch` upserts `vote_totals` rows sorted by contestant, and `vote_buckets` rows by contestant then minute.
+
+**The deadlock was real, and the first test missed it.**
+- **Two batches in opposite orders:** passed without the fix. The upsert takes under a millisecond, so two transactions rarely interleave inside it.
+- **Six batches at once, in random contestant orders, 30 rounds:** failed with `deadlock detected` on the unsorted code, and passes (three runs) with the rows sorted. That's the test kept.
+- **In production:** under sustained load, thousands of batches an hour make even a rare interleaving certain. Postgres would abort one side and the retry would still count correctly, but it costs a batch and a pause.
+
+**Not sorted:** `votes` and `dead_letters` inserts. Their keys differ between consumers, except in a redelivery during a rebalance, and then both copies are in the same partition order.
+
+## F37 — How the done-when was verified
+Details and tables are in `load-results/consumer-replicas.md`.
+- **Method:** the whole stack ran, with 2 ingest replicas. For each count of 1, 2 and 3 consumers, the generator asked for 20,000/s for 90 s, then the backlog drained.
+- **Partitions:** 24, then 12/12, then 8/8/8.
+- **Accepted/s:** 7,699, 5,120 and 4,634.
+- **Counted/s:** 3,801, 4,708 and 4,626.
+- **Backlog peak:** 368,075 votes (drained in 69 s), then 52,273 (10 s), then none.
+- **Counts:** all 1,631,357 accepted votes were counted exactly once (Postgres and ClickHouse), with no drift, no failed batches and no deadlocks.
+- **Deviation:** the plan said 10,000 votes/s. The laptop couldn't deliver it with everything running.
+- **Why total throughput stayed flat:** the laptop was at 5.6–6.1 of 8 logical threads. Each consumer, with its share of Postgres, took CPU from ingest. On this machine, the whole pipeline runs at about 4,700/s however the work is split. What more consumers bought here is a board that keeps up with what's accepted. Adding capacity needs a machine with spare cores.
+- **Afterwards:** the test votes were wiped with `pnpm reset:votes --yes`, which also restarted ingest and the consumer at one replica each. Showcase is closed.
 

@@ -149,10 +149,17 @@ export async function processBatch(messages: InboundMessage[], deps: Deps): Prom
     for (const { contestantId } of inserted) {
       if (contestantId) increments.set(contestantId, (increments.get(contestantId) ?? 0) + 1);
     }
+    // Shared rows are upserted in a fixed order (contestant, then minute). Several consumers (F37)
+    // update the same rows; taken in arrival order, two batches can lock them in opposite orders
+    // and deadlock.
     if (increments.size) {
       await tx
         .insert(schema.voteTotals)
-        .values([...increments].map(([contestantId, total]) => ({ contestantId, total })))
+        .values(
+          [...increments]
+            .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+            .map(([contestantId, total]) => ({ contestantId, total })),
+        )
         .onConflictDoUpdate({
           target: schema.voteTotals.contestantId,
           set: {
@@ -179,7 +186,15 @@ export async function processBatch(messages: InboundMessage[], deps: Deps): Prom
     if (perMinute.size) {
       await tx
         .insert(schema.voteBuckets)
-        .values([...perMinute.values()])
+        .values(
+          [...perMinute.values()].sort((a, b) =>
+            a.contestantId < b.contestantId
+              ? -1
+              : a.contestantId > b.contestantId
+                ? 1
+                : a.bucketMinute.getTime() - b.bucketMinute.getTime(),
+          ),
+        )
         .onConflictDoUpdate({
           target: [schema.voteBuckets.contestantId, schema.voteBuckets.bucketMinute],
           set: { count: sql`${schema.voteBuckets.count} + excluded.count` },

@@ -515,6 +515,15 @@ Built before F33, like F34, so the deployment starts with the scalable shape. Wi
 
 **Done when:** at 10,000 votes/s, three consumers each own an even share of the partitions and drain the backlog faster than one does. Every accepted vote is counted exactly once, and `pnpm reconcile` finds no drift.
 
+*Decided (F37):* as planned, with `CONSUMER_REPLICAS` (default 1) like `INGEST_REPLICAS`.
+- **The deadlock:** a test that runs six batches at once in random contestant orders hit `deadlock detected` before the rows were sorted, and passes after.
+- **The load:** the generator asked for 20,000/s. With the whole stack on the laptop, it delivered 4,600–7,700/s, not the planned 10,000.
+- **Partitions:** three consumers held 8 each.
+- **Backlog:** 368,075 votes with 1 consumer, 52,273 with 2, and none with 3.
+- **Counts:** all 1,631,357 votes counted exactly once, with no drift.
+- **Throughput:** the whole pipeline stayed at about 4,700/s, because the laptop's cores were the limit.
+- Details in `load-results/consumer-replicas.md`.
+
 ---
 
 ## Optional: F38–F40 — Kubernetes

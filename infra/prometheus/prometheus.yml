@@ -10,14 +10,18 @@ scrape_configs:
       - targets:
           - gateway:4001
           - generator:4002
-          - consumer:4003
           - analytics-consumer:4004
           - web:3000
-    # F36: every ingest replica, found through Docker's DNS (the name resolves to all of them).
+    # F36/F37: every ingest and consumer replica, found through Docker's DNS (a service's name
+    # resolves to all of its replicas).
     dns_sd_configs:
       - names: [ingest]
         type: A
         port: 4000
+        refresh_interval: 5s
+      - names: [consumer]
+        type: A
+        port: 4003
         refresh_interval: 5s
   - job_name: redpanda
     metrics_path: /public_metrics

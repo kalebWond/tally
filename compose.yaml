@@ -168,7 +168,10 @@ services:
       redis: { condition: service_healthy }
       migrate: { condition: service_completed_successfully }
     build: { context: ., dockerfile: services/consumer/Dockerfile }
-    ports: ["4003:4003"]
+    # F37: several replicas share the tally-consumer group, each taking a share of the partitions.
+    # No host port, so they can scale: CONSUMER_REPLICAS=3 docker compose --profile app up -d.
+    deploy:
+      replicas: ${CONSUMER_REPLICAS:-1}
 
   # Second consumer group (F20): votes.raw + votes.dead → ClickHouse. Live results never wait for it.
   analytics-consumer:

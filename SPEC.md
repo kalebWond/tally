@@ -86,7 +86,7 @@ The analytics consumer runs in a **separate consumer group**, so it reads the sa
 |---|---|---|---|
 | `web` | Next.js / TS | 3000 | Results, admin, generator control UI |
 | `ingest` | Fastify / TS | 4000 | Validate and publish votes. *Changed (F36):* runs as `INGEST_REPLICAS` replicas (default 1) behind `ingest-proxy` (nginx), which owns port 4000. |
-| `consumer` | Node / TS | 4003 | Aggregate into Postgres + Redis. *Decided (F1): port serves `/health` only* |
+| `consumer` | Node / TS | 4003 | Aggregate into Postgres + Redis. *Decided (F1): port serves `/health` only.* *Changed (F37):* runs as `CONSUMER_REPLICAS` replicas (default 1) in one group, each owning a share of the partitions; in containers the port isn't published on the host. |
 | `gateway` | Node / TS | 4001 | Poll Redis, broadcast over WebSocket |
 | `analytics-consumer` | Node / TS | — | Batch insert into ClickHouse (later) |
 | `generator` | Go | 4002 | Produce synthetic vote load, HTTP control API |

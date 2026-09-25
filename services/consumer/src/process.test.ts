@@ -67,6 +67,26 @@ beforeEach(async () => {
 });
 
 describe('processBatch', () => {
+  it('concurrent batches from several consumers never deadlock, and count exactly (F37)', async () => {
+    // Six consumers' batches touching the same contestants in random orders. Rows upserted in
+    // arrival order can lock C1…C10 against C10…C1 and deadlock; sorted, they queue instead.
+    const batch = (codes: string[]) =>
+      asMessages(
+        Array.from({ length: 200 }, (_, i) => voteEvent(codes[Math.floor(i / 20)] ?? 'C1')),
+      );
+    const shuffled = () => [...CODES].sort(() => Math.random() - 0.5);
+    for (let round = 0; round < 30; round++) {
+      await Promise.all(Array.from({ length: 6 }, () => processBatch(batch(shuffled()), deps())));
+    }
+    expect(await snapshot()).toMatchObject({
+      votes: 36_000,
+      total: 36_000,
+      dead: 0,
+      redisSum: 36_000,
+      redisMatchesPg: true,
+    });
+  });
+
   it('1,000 votes produce totals of exactly 1,000 in Postgres and Redis', async () => {
     const events = Array.from({ length: 1000 }, (_, i) =>
       voteEvent(CODES[i % CODES.length] ?? 'C1'),
