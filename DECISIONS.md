@@ -33,6 +33,7 @@ Where the build departs from `SPEC.md` or `IMPLEMENTATION_PLAN.md`, or pins down
 | Lower third (plan F32) | the footer becomes a strip pinned to the bottom | none: built, then removed at the user's request (it covered rows and cards); the footer is a line again | F32 |
 | Header (plan F32) | the contest name as a lit sign, text straight on the stage | a glass title plate was added for contrast, then removed at the user's request; the header is as in F31 | F32 |
 | Status label (plan F32) | FINAL becomes "Final results" | still "Final", on a gold plate; the footer already says these are the final results | F32 |
+| Build order (plan) | F33 deployment, then F34 README | F34 first, at the user's request; F33 adds the demo URL to the README | F34 |
 | Frame rate (plan F32) | the F31 60 fps check at 20,000 votes/s still passes | dropped: the generator is a mock, and performance targets apply to the data pipeline, not the frontend at its maximum rate | F32 |
 | Voter hash (SPEC §5) | `SHA-256` of sender + salt | `HMAC-SHA256`, salt as the key, sender trimmed first | F3 |
 | Idempotency key (SPEC §6, plan F3) | ingest generates one (a UUID) | client `Idempotency-Key` header is honoured; ingest generates a UUID only when absent. Keys are 1–128 visible ASCII, not necessarily UUIDs | F3 |
@@ -964,3 +965,26 @@ A headless Chrome check at 1920×1080, on the dev build, on Tally Showcase (rest
 - **Fit:** all ten rows at 1920×1080. No console errors.
 
 The sway checks were corrected afterwards to compare peak turning speed, and the quiet sway was lengthened to 36 s. The check wasn't rerun after that or after the header plate came off, at the user's request. `lib/lighting.test.ts` covers the cue rules: the hold, the gap between cues, retargeting, the finale seen live versus loaded closed, ties, the aim geometry and the sway period.
+
+## F34 — README: a clip first, then the case
+**Decided:** the README opens with what a reader can take in without scrolling:
+- **A clip:** a 23 s loop of the board with live voting, a lead change and the close.
+- **Four points:** the pipeline, correctness under at-least-once delivery, the measured numbers, and the board.
+
+Below that:
+- **Architecture:** a Mermaid diagram of the services, a sequence diagram of one vote's journey, and a table of what each service does.
+- **Screens:** stills of the board, the card grid, the generator panel and the recap.
+- **Performance:** the F19 numbers with their caveats, including the F23 regression, and the rule that performance targets apply to the data pipeline.
+- **Decisions:** the eleven that shape the system, each with its cost, and a pointer here for the rest.
+
+**Media:** recorded, not mocked up.
+- **The clip:** headless Chrome on the laptop's GPU drove Tally Showcase at 700 votes/s, forced a lead change and closed the contest, all recorded with the screencast API.
+- **Encoding:** ffmpeg encoded the frames at their real timing, as an H.264 MP4 (3 MB) and a 960 px animated WebP (3.3 MB) that GitHub shows inline.
+- **Afterwards:** Showcase's votes were deleted from Postgres, Redis and ClickHouse, filtered to that contest.
+
+**Alternatives:**
+- A GIF: several times the size, and 256 colours for a gradient-heavy stage.
+- A video uploaded through GitHub's editor: it would only exist on GitHub.
+- Diagrams as images: Mermaid stays editable and renders on GitHub.
+
+**Also:** the test data left from earlier checks was removed: the "F24 Grid Check" and "F26 Check" contests (6 contestants, no votes) and their Redis keys, and two recap renders from the F25 and F26 checks. The user's own contest was untouched.

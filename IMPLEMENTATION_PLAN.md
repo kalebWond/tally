@@ -453,6 +453,14 @@ Verified: the F32 functional check in headless Chrome, on the dev build before t
 
 **Done when:** Someone unfamiliar with the project understands what it does and why it's built this way within about 30 seconds.
 
+*Decided (F34):* built before F33, at the user's request; F33 adds the public URL to the README. The README leads with a looping clip of the board and a four-point summary. It has:
+- Mermaid diagrams: the services, and one vote end to end
+- a table of stills
+- the performance numbers, with their caveats
+- the decisions that shape the system
+
+The clip and stills (`docs/media`) were recorded from Tally Showcase with headless Chrome's screencast and ffmpeg. Its votes were wiped afterwards, along with the leftover test contests and recap renders.
+
 ---
 
 ## Optional: F35–F37 — Kubernetes
