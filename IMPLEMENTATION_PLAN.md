@@ -557,7 +557,11 @@ Built before F33, like F34, so the deployment starts with the scalable shape. Wi
   - a 2 s connect timeout that turned overload into failed votes
 - **Fixes:** `worker_rlimit_nofile` plus a container `ulimits`, 1,024 kept-open connections to the replicas, and a 10 s connect timeout.
 - **Workers:** the launcher uses the default 256, since on a LAN more only adds queueing.
-- **Still to do:** the run from the Windows machine, which is the measured part of the done-when.
+- **Measured from the Windows machine** (`load-results/two-device.md`), with 2 ingest replicas and 2 consumers, asking for 10,000/s with a 30 s burst to 20,000/s:
+  - Accepted 3,900–4,600/s and counted 3,600–4,200/s. The backlog peaked at 29,211 and drained in under 4 s.
+  - All 761,669 votes were accounted for, with 0 failures and no drift.
+  - **The limits:** the generator's 256 workers at a ~56 ms round trip (Wi-Fi, nginx, and queueing on a busy laptop) cap intake at about 4,600/s. The laptop itself ran at 7.5–7.8 of 8 threads.
+  - **Against one machine** (5,120/s accepted, 4,708/s counted), there was no gain: the laptop's CPU remains the ceiling.
 
 ---
 

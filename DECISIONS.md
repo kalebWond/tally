@@ -1131,3 +1131,13 @@ After both fixes, a 256-worker run at 3,000–5,000/s had 0 failures, a p95 of 8
 - **Afterwards:** single-machine mode was restored (the local generator is back, and web has no override) and the test votes were wiped.
 - **Pending:** the run from the Windows machine.
 
+## F38 — The run from the Windows machine
+Details are in `load-results/two-device.md`.
+- **Setup:** the generator on the Windows PC (192.168.1.2, Ryzen 7 5800H) over Wi-Fi. ESET Internet Security needed an inbound rule for TCP 4002, placed at the top of its list. The laptop ran 2 ingest replicas and 2 consumers.
+- **Load:** 10,000/s asked, with a 30 s burst to 20,000/s.
+- **Throughput:** accepted 3,900–4,600/s and counted 3,600–4,200/s. The backlog peaked at 29,211 and drained in under 4 s.
+- **Correctness:** all 761,669 votes accepted = counted plus dead-lettered, with 0 failures and no drift.
+- **The generator was capped at 4,600/s:** 256 workers ÷ ~56 ms per round trip. Ingest itself took ~18 ms at p50. The rest was Wi-Fi, nginx, and queueing on a laptop at 7.5–7.8 of 8 threads.
+- **The launcher's 256 was based on a wrong estimate.** It assumed a 30 ms round trip, and the measured one was 56 ms. The comment now says so, and the setting stays 256: more workers would lift the generator's cap, but not the laptop's.
+- **Conclusion:** no gain over one machine (5,120/s accepted, 4,708/s counted). The laptop's CPU is the ceiling, so going higher needs a host with more cores.
+

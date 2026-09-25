@@ -142,8 +142,8 @@ A feature is done when its check in `IMPLEMENTATION_PLAN.md` passes, tests cover
 
 Update this section as you go.
 
-**Last completed:** F37, scale out counting (2026-09-25). F36, ingest replicas, and F35, partition votes evenly, before it. F34–F37 were built before F33 at the user's request. Measured on this laptop, the whole pipeline runs at about 4,600–4,700 votes/s however ingest and consumers are split; its 4 cores are the limit (`load-results/`).
-**Next up:** F38, generator on a second device. The app side is built and wiring-tested with a stand-in. What's left is the run from the Windows machine (Ryzen 7 5800H, no Docker) and its measurement. F33, deployment, is optional now, at the user's request. Outstanding: the k6 spike regression (DECISIONS, F23); more than one ingest replica is the obvious next step there.
+**Last completed:** F38, generator on a second device (2026-09-26): a Windows `.exe`, no Docker needed there; the whole pipeline measured the same as on one machine, since the laptop's CPU is the ceiling. F37, scale out counting (2026-09-25). F36, ingest replicas, and F35, partition votes evenly, before it. F34–F37 were built before F33 at the user's request. Measured on this laptop, the whole pipeline runs at about 4,600–4,700 votes/s however ingest and consumers are split; its 4 cores are the limit (`load-results/`).
+**Next up:** clean-up work, at the user's request. Optional after that: F33 deployment and F39–F41 Kubernetes. Two-device mode is on in `.env` (generator on the Windows PC at 192.168.1.2). F33, deployment, is optional now, at the user's request. Outstanding: the k6 spike regression (DECISIONS, F23); more than one ingest replica is the obvious next step there.
 
 **Seed contest:** `0192f3a0-7c1e-7000-8000-00000000c0de` ("Tally Showcase"), codes `C1`–`C10`, closed and without votes. Checks and demos that vote in it wipe its votes afterwards (Postgres, Redis and ClickHouse, filtered to the contest), so no test data is left behind. The README's media (`docs/media`) was recorded from it.
 

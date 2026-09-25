@@ -17,8 +17,8 @@ sed 's/$/\r/' >"$out/run-generator.cmd" <<EOF
 rem Tally load generator (F38). Sends votes to the app machine's ingest; controlled from its /control page.
 rem If the app machine's address changes, edit INGEST_URL below.
 set INGEST_URL=http://$host:4000
-rem Each worker waits for its own request, so the rate is capped at workers / latency: 256 at 30 ms
-rem is about 8,500 votes/s, above what the app machine's pipeline takes. More only adds queueing.
+rem Each worker waits for its own request, so the rate is capped at workers / latency. Over Wi-Fi to
+rem a busy laptop a round trip took ~56 ms, so 256 capped it near 4,600 votes/s (F38); raise it to go higher.
 set GENERATOR_WORKERS=256
 set PORT=4002
 echo Tally generator on port %PORT%, sending to %INGEST_URL%. Ctrl+C to stop.
