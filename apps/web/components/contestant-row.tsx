@@ -34,6 +34,11 @@ interface Props {
   /** Its place in the standings: a change is what makes the row measure itself and glide. */
   index: number;
   leader: boolean;
+  /**
+   * On the podium (F39): one of the first three places, with at least one vote. The value is the
+   * medal, from its rank (gold, silver, bronze), so a tie shares a medal.
+   */
+  podium?: 1 | 2 | 3 | undefined;
   /** Before the first snapshot the total is unknown, so show a dash rather than a false zero. */
   synced: boolean;
   /** Set briefly after an overtake: a rising row lifts above the rows it passes. */
@@ -49,16 +54,17 @@ interface Props {
  * overtake treatment and the live feed carry straight on (CLAUDE.md: one component, two layouts).
  */
 export function ContestantRow(props: Props) {
-  const { standing, layout, index, leader, synced, movement } = props;
+  const { standing, layout, index, leader, podium, synced, movement } = props;
   const from = standing.accentFrom ?? DEFAULT_FROM;
   const to = standing.accentTo ?? DEFAULT_TO;
   // Reduced motion: no lift (Motion would otherwise jump the scale rather than skip it).
   const reduce = useReducedMotion();
   const lift = movement === 'up' && !reduce;
-  // What the row's measurements depend on: its arrangement and its place. Its parts measure
-  // with it (F32): a part that kept an old measurement while the row re-measured was placed
-  // relative to the row from where it used to be, and could stay a slot away from its panel.
-  const place = `${layout}:${index}`;
+  // What the row's measurements depend on: its arrangement, its place and whether it stands on
+  // the podium (which sizes it). Its parts measure with it (F32): a part that kept an old
+  // measurement while the row re-measured was placed relative to the row from where it used to
+  // be, and could stay a slot away from its panel.
+  const place = `${layout}:${index}:${podium ?? 0}`;
 
   return (
     <motion.li
@@ -71,6 +77,7 @@ export function ContestantRow(props: Props) {
       className="row"
       data-layout={layout}
       data-leader={leader || undefined}
+      data-podium={podium}
       data-rising={movement === 'up' || undefined}
       data-moved={movement ? true : undefined}
       data-code={standing.code}

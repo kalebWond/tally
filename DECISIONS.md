@@ -1141,3 +1141,61 @@ Details are in `load-results/two-device.md`.
 - **The launcher's 256 was based on a wrong estimate.** It assumed a 30 ms round trip, and the measured one was 56 ms. The comment now says so, and the setting stays 256: more workers would lift the generator's cap, but not the laptop's.
 - **Conclusion:** no gain over one machine (5,120/s accepted, 4,708/s counted). The laptop's CPU is the ceiling, so going higher needs a host with more cores.
 
+## Code review after F34
+A `/code-review` of the F31–F34 diff found ten issues. The user went through each one, and the decisions are recorded here.
+
+**Fixed as F31/F32 follow-ups:**
+- **Double-click on Start stopped the generator.** Start and Stop share one button, which turned into Stop as soon as the start request returned (tens of milliseconds), so a habitual double-click's second click stopped the run. After the button changes role, it now ignores clicks for about 600 ms.
+- **The Dialog wrapper can't be used uncontrolled.** It always passes `open`, so a `DialogTrigger` would never open it. Nothing used the trigger, so it was removed rather than supported.
+- **The leader's glow changed brightness mid-overtake.** At rest it painted beneath the row's panel, and while the row moved it painted above it. The row now isolates its own layers, so the glow is always drawn over the panel: the brighter of the two looks, at the user's choice.
+- **The hidden layout toggle still took taps.** On a touch screen, a tap could switch layout while the toggle was invisible. When hidden, it no longer takes pointer input, and the first tap only brings it back.
+- **The backlog line duplicated two helpers.** It now uses `backlogParts`/`backlogLine` and the `APPEAR` preset, with the wording unchanged.
+
+**Folded into F39** (see the plan):
+- the beams aiming at the winner's old position after a layout switch: the finale no longer aims
+- the confetti restarting when the colour changed: it plays once, when counting has finished
+- the rows animating `filter` at the close: replaced with opacity
+
+**Left as is, at the user's decision:**
+- **Duplicate test IDs for about 150 ms while a sample row is removed:** no effect on users, and nothing in the repo relies on those IDs.
+- **"Counting 237 queued vote":** the noun follows the real count while the number is still counting towards it, for about half a second. A minor glitch. The suggested rewording, with a colon, wasn't wanted.
+
+## F39 — Podium and a finale on the true result: what building it turned up
+- **The finale waits for the true result.** `lib/lighting.ts` gained a `counting` state, entered at the close while the backlog isn't empty.
+  - **While counting:** the cue stays `live`, and a lead change still gets its spotlight, since late counts can still change the lead.
+  - **When the backlog empties:** the finale plays, with the stage in the winner's colours at once.
+  - **On load:** a page that finds the contest closed and counted poses the finale. One that finds it still counting plays it when counting ends.
+  - **An unknown backlog** (no consumer reporting) counts as not yet counted.
+  - **Why this was chosen:** the user chose "backlog empty" over "totals unchanged for a few seconds", which could fire too early.
+  - **The cost:** the backlog is shared by every contest, so a second contest voting at the same time would hold this one's finale. That's noted in the code and CLAUDE.md.
+- **The beams wander instead of aiming.** It's the same Web Animation as the sway, with a wider reach (±20°) and a fixed tempo per beam (7.5 s and 10 s), so they drift in and out of step. The once-a-second tempo update leaves a wandering beam alone. That removed the finale's aiming, and with it the review's "beams aimed at the old row after a layout switch".
+- **The confetti plays once, for about 9.6 s.** It takes the winner's colour when it starts, and its effect no longer depends on the colour, which is what used to restart it. 260 pieces each enter at their own moment over the first 5 s.
+- **The podium grows by transforms.** The first idea, larger font sizes, would have jumped: the row's parts move by position only (F32), and font size isn't something Motion scales. So:
+  - The podium row gets more padding and a larger avatar. Both are animated by the layout system.
+  - Its name, rank and score get a CSS `transform: scale` with a spring transition. The name's `max-width` is divided by the same factor, so scaled, it still ends where the column does.
+- **The grid has twelve tracks.** The podium cards span 4 and the rest span 3, 4 or 6 by width. `auto-fill` couldn't give the first three a row of their own. The podium counts only places with at least one vote, so a board with no votes has none.
+- **Rows step back at the close with opacity (0.62), not a filter.** Afterwards, at the user's request, the connection-lost dim also dropped its `saturate` and dims with opacity alone (0.5). No `filter` moves on the board now.
+
+## F39 — How the done-when was verified
+Headless Chrome against the `app` stack, on four test contests ("F39 Check 3/7/10/16"). The test contests were deleted afterwards from Postgres, Redis and ClickHouse, and reconcile found no drift.
+- **Layouts:** 3, 7, 10 and 16 contestants, list and grid, at 1920×1080 and at 390×844 (phone).
+  - The podium was always three.
+  - **Sizes:** list podium rows 96 px against 72 px (phone: 76 against 64). Grid podium cards 297 px against 253 px.
+  - **Arrangement:** on desktop the podium cards share one row and the rest start below. On a phone they stack.
+  - No name overlapped a score, and nothing scrolled sideways. Ten list rows end at 1,061 px on a 1080p screen.
+- **The overtake, on the GPU (148 frames over 2.5 s):** P4 took 3rd from P3. P4 grew 72 → 96 px in steps of at most 6.3 px per frame, with its name's scale 1.00 → 1.16 alongside. P3 shrank the same way.
+- **The close with votes queued:**
+  - **Setup:** the consumer was stopped, and votes putting 2nd place ahead were queued. After 13 s the backlog was unknown, and the contest was closed.
+  - **For 6 s:** cue `live`, no confetti, "Final" shown.
+  - **Consumer started:** the late count made P1 the leader. The confetti started once, lasted 9.6 s, and the stage glow was P1's colour (#E63946). The finale started at the same moment.
+- **The finale beams:** periods 7.5 s and 10 s, cone angles between −20° and +20°, no aim.
+- **Rows at the close:** opacity 0.62, filter none, and the leader at 1.
+- **Reload:** cue `finale` and no confetti.
+- **No console errors.** Lint, typecheck and the web tests pass: 103, including 6 new lighting tests. Before the implementation, the new tests failed as expected.
+
+## F39 on this branch: the podium and finale with replicas
+**Context:** F39 and the code-review fixes were built on `main`, which has one ingest and one consumer. At the user's request they were brought to this branch, to run with the replicas (F36, F37) and the two-device setup (F38).
+**How:** the branch had never touched `apps/web`, so the web changes applied unchanged, as the diff of `main`'s commits `302e2d8`, `3634e9f` and `c12108b`. The docs were merged by hand.
+**Why it fits the replicas:** the finale waits for "counted", meaning the backlog is empty. The backlog is summed across every consumer's partitions (F29 was built for several consumers), so with 2 or 3 consumers the finale still waits until every queued vote is counted.
+**The known risk carries over:** the code review's medium finding still stands. With several consumers, the contest-wide `totalVotes` and per-minute counts in Redis can stay too low. The podium and the per-contestant totals are unaffected, but the header's "votes cast" can end below the sum of the rows. The branch test checks for it.
+

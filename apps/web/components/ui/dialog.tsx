@@ -36,16 +36,13 @@ function pressOrigin() {
   return `calc(${lastPress.x}px - 50vw + 50%) calc(${lastPress.y}px - 50vh + 50%)`;
 }
 
+/** Controlled only: callers pass `open` (the content's exit animation needs to know it). */
 function Dialog({ open = false, ...props }: React.ComponentProps<typeof DialogPrimitive.Root>) {
   return (
     <DialogOpen.Provider value={open}>
       <DialogPrimitive.Root data-slot="dialog" open={open} {...props} />
     </DialogOpen.Provider>
   );
-}
-
-function DialogTrigger({ ...props }: React.ComponentProps<typeof DialogPrimitive.Trigger>) {
-  return <DialogPrimitive.Trigger data-slot="dialog-trigger" {...props} />;
 }
 
 function DialogPortal({ ...props }: React.ComponentProps<typeof DialogPrimitive.Portal>) {
@@ -200,5 +197,4 @@ export {
   DialogOverlay,
   DialogPortal,
   DialogTitle,
-  DialogTrigger,
 };

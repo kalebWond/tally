@@ -3,19 +3,24 @@
 import { useEffect, useRef } from 'react';
 
 const GOLDS = ['#f2c14e', '#ffdc86', '#d9a33a', '#fff4d6'];
-const PIECES = 140;
-/** Long enough for the slowest piece to fall past the bottom of the screen. */
-const LAST_MS = 5200;
+/** Pieces arrive over the first few seconds, so the fall lasts about nine (F39). */
+const PIECES = 260;
+const ARRIVE_S = 5;
+/** The last piece to enter, at the slowest fall, is past a 1080 px screen by then. */
+const LAST_MS = 9600;
 
 /**
- * One burst of gold confetti when voting closes (F32), in front of the board: a canvas drawn
- * for about five seconds, which then removes itself. Played only when the page sees the close,
- * never for reduced motion (components/stage/stage.tsx decides).
+ * One fall of gold confetti when the result is in (F32, F39), in front of the board: a canvas
+ * drawn for about nine seconds, which then removes itself. Played only when the page sees the
+ * last vote counted after the close, never for reduced motion (components/stage/stage.tsx
+ * decides). It plays once: the winner's colour is taken when it starts, and a later colour
+ * change doesn't start it again.
  */
 export function Confetti({ colour, onDone }: { colour: string; onDone: () => void }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const done = useRef(onDone);
   done.current = onDone;
+  const accent = useRef(colour);
 
   useEffect(() => {
     const el = canvas.current;
@@ -28,11 +33,12 @@ export function Confetti({ colour, onDone }: { colour: string; onDone: () => voi
     el.height = h * dpr;
     g.scale(dpr, dpr);
 
-    const colours = [...GOLDS, colour];
+    const colours = [...GOLDS, accent.current];
     const pieces = Array.from({ length: PIECES }, () => ({
       x: Math.random() * w,
-      // Staggered above the top edge, so they arrive over the first second and a half.
-      y: -20 - Math.random() * h * 0.6,
+      // Staggered: each enters at the top edge at its own moment over the first ARRIVE_S seconds.
+      delay: Math.random() * ARRIVE_S,
+      y: -20,
       fall: 110 + Math.random() * 120,
       drift: 20 + Math.random() * 40,
       phase: Math.random() * Math.PI * 2,
@@ -46,10 +52,12 @@ export function Confetti({ colour, onDone }: { colour: string; onDone: () => voi
       const t = (now - start) / 1000;
       g.clearRect(0, 0, w, h);
       for (const p of pieces) {
-        const y = p.y + p.fall * t + 30 * t * t;
+        const age = t - p.delay;
+        if (age < 0) continue;
+        const y = p.y + p.fall * age + 30 * age * age;
         if (y > h + 20) continue;
-        const x = p.x + Math.sin(p.phase + t * 2) * p.drift;
-        const angle = p.phase + p.spin * t;
+        const x = p.x + Math.sin(p.phase + age * 2) * p.drift;
+        const angle = p.phase + p.spin * age;
         g.save();
         g.translate(x, y);
         g.rotate(angle);
@@ -63,7 +71,7 @@ export function Confetti({ colour, onDone }: { colour: string; onDone: () => voi
       else done.current();
     });
     return () => cancelAnimationFrame(frame);
-  }, [colour]);
+  }, []);
 
   // Nothing here for assistive technology: the board says who won.
   return <canvas ref={canvas} className="stage-confetti" data-testid="confetti" />;

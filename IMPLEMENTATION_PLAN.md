@@ -565,9 +565,49 @@ Built before F33, like F34, so the deployment starts with the scalable shape. Wi
 
 ---
 
-## Optional: F39–F41 — Kubernetes
+## F39 — Podium and a finale on the true result
 
-*Renumbered:* was F28–F30, then F31–F33, then F32–F34, then F33–F35, then F34–F36, then F35–F37, then F37–F39 (F35 and F36 were added), then F38–F40 (F36 ingest replicas was added), then F39–F41 (F38 two devices was added).
+*Added (after F34):* from a code review of F31–F34 and the user's walk-through of it.
+- **The finale fired too early.** It started when voting closed, while votes accepted before the close could still be counted. A late count could change the winner.
+- **The confetti could restart.** It was tied to the stage colour, so a new leader after the close started a second full burst.
+- **The beams missed after a layout switch.** In the finale they rest on the winner, and switching to the grid left them aimed where the row used to be.
+- **The top three didn't stand out** from the rest.
+
+**Build:**
+- **The finale waits for the true result.** After voting closes, it starts when the counting backlog reaches zero.
+  - **Until then:** the beams keep their live sway, a lead change still gets its spotlight, and the "Final" badge shows as now.
+  - **At that moment, together:** confetti in the winner's colour, played once for about 9 s and never restarted, and the beams start wandering. They no longer aim at the winner.
+  - **A page that loads a contest already closed and counted** shows the finale pose without confetti, as now.
+  - *Assumption:* the backlog is system-wide, all contests together. With two contests voting at once, one contest's finale would wait for the other's queue. Today the generator drives one contest at a time.
+- **The top three stand out,** for any number of contestants.
+  - **List:** rows 1–3 are taller, with a larger name and score. 1st keeps its gold, and 2nd and 3rd get silver and bronze rims. Rows from 4th down are slightly more compact.
+  - **Grid:** the first three sit alone on a row of larger cards, and the rest flow below as now.
+  - **Phones:** the podium stacks.
+  - **Small contests:** with three or fewer contestants, everyone is on the podium.
+  - **Movement:** a row moving onto or off the podium changes size and position in one layout animation. With reduced motion it jumps.
+- **At the close, the other rows step back with opacity,** not a `filter` (CLAUDE.md: only `transform` and `opacity` move on the board).
+
+**Done when:**
+- **Layouts:** list and grid read correctly with 3, 7, 10 and 16 contestants, at 1920×1080 and at phone width.
+- **Overtakes:** an overtake between 3rd and 4th glides, with the sizes changing smoothly.
+- **Closing with votes still queued:** the confetti goes off once, when the backlog reaches zero, lasts about 9 s, and is in the final winner's colour even if a late count changes the lead. The beams start wandering at that moment.
+- **Reloading a closed contest** shows the pose without confetti.
+
+*Decided (F39):* as planned.
+- **The finale:** the lighting gained a `counting` state between the close and the finale. The beams wander ±20° at periods of 7.5 s and 10 s. The confetti lasts about 9.6 s: 260 pieces entering over 5 s. The winner's colour is taken when it starts.
+- **The podium:** the list's podium rows are 96 px tall against 72 px. Their name, rank and score grow by scale transforms (×1.16–1.2), and the grid has twelve tracks.
+- **Verified in headless Chrome:**
+  - **Layouts:** 3, 7, 10 and 16 contestants, list and grid, at 1920×1080 and 390×844. The podium was always three, names never overlapped scores, there was no sideways scroll, and ten rows fit at 1080p.
+  - **A 3rd/4th swap at 60 fps:** heights changed by at most 6 px per frame.
+  - **A close with votes queued:** the consumer was stopped. Queued votes put a new leader first, and the confetti went off once, for 9.6 s, in that leader's colour.
+  - **A reload** showed the pose without confetti.
+  - Details are in `DECISIONS.md`.
+
+---
+
+## Optional: F40–F42 — Kubernetes
+
+*Renumbered:* was F28–F30, then F31–F33, then F32–F34, then F33–F35, then F34–F36, then F35–F37, then F37–F39 (F35 and F36 were added), then F38–F40 (F36 ingest replicas was added), then F39–F41 (F38 two devices was added), then F40–F42 (F39 podium and finale was added).
 
 **Prerequisites already satisfied:** environment-variable config, no local disk state, health endpoints, graceful SIGTERM.
 
@@ -592,6 +632,7 @@ Built before F33, like F34, so the deployment starts with the scalable shape. Wi
 | 35 | F34 | Written up |
 | 36 | F35–F37 | Ingest and counting scale out |
 | 37 | F38 | Two devices |
-| Optional | F33, F39–F41 | Deployed; Kubernetes |
+| 38 | F39 | Podium and finale (built on `main`, brought here) |
+| Optional | F33, F40–F42 | Deployed; Kubernetes |
 
 Stopping after session 13 already leaves you with something worth showing.

@@ -12,7 +12,13 @@ import {
   swayPeriod,
 } from './lighting';
 
-const open = (leaders: string[]) => ({ status: 'open' as const, leaders });
+const open = (leaders: string[]) => ({ status: 'open' as const, leaders, counted: true });
+/** Voting closed; `counted` once the queue has emptied (the true result is in). */
+const closed = (leaders: string[], counted = true) => ({
+  status: 'closed' as const,
+  leaders,
+  counted,
+});
 
 /** Feeds readings in order: [time, input] pairs. */
 function run(steps: [number, Parameters<typeof advance>[1]][], from: Lighting = initialLighting) {
@@ -27,14 +33,23 @@ describe('first reading', () => {
     expect(l.spotlight).toBeNull();
   });
 
-  it('a page opened on a closed contest shows the finale settled, not played', () => {
-    const l = run([[1000, { status: 'closed', leaders: ['a'] }]]);
+  it('a page opened on a closed, counted contest shows the finale settled, not played', () => {
+    const l = run([[1000, closed(['a'])]]);
     expect(cueOf(l)).toBe('finale');
     expect(l.finale).toBe('settled');
   });
 
+  it('a page opened while the last votes are counted plays the finale when counting ends', () => {
+    const counting = run([[1000, closed(['a'], false)]]);
+    expect(cueOf(counting)).toBe('live');
+    expect(counting.finale).toBe('counting');
+    const done = run([[4000, closed(['a'])]], counting);
+    expect(cueOf(done)).toBe('finale');
+    expect(done.finale).toBe('live');
+  });
+
   it('a contest not yet open keeps the lights down', () => {
-    expect(cueOf(run([[0, { status: 'draft', leaders: [] }]]))).toBe('dark');
+    expect(cueOf(run([[0, { status: 'draft', leaders: [], counted: true }]]))).toBe('dark');
   });
 });
 
@@ -99,11 +114,31 @@ describe('a lead change', () => {
 });
 
 describe('the close', () => {
-  it('seen live, plays the finale in the winner’s colours at once', () => {
+  it('waits for the counting: the beams sway on while votes accepted before it are counted', () => {
     const l = run([
       [0, open(['a'])],
-      [20_000, open(['b'])],
-      [21_000, { status: 'closed', leaders: ['b'] }],
+      [20_000, closed(['a'], false)],
+    ]);
+    expect(cueOf(l)).toBe('live');
+    expect(l.finale).toBe('counting');
+  });
+
+  it('a late count that changes the lead still gets its spotlight', () => {
+    const l = run([
+      [0, open(['a'])],
+      [20_000, closed(['a'], false)],
+      [22_000, closed(['b'], false)],
+    ]);
+    expect(cueOf(l)).toBe('spotlight');
+    expect(l.spotlight?.target).toBe('b');
+  });
+
+  it('plays the finale when the last vote is counted, in the final winner’s colours at once', () => {
+    const l = run([
+      [0, open(['a'])],
+      [20_000, closed(['a'], false)],
+      [22_000, closed(['b'], false)],
+      [23_000, closed(['b'])],
     ]);
     expect(cueOf(l)).toBe('finale');
     expect(l.finale).toBe('live');
@@ -111,18 +146,28 @@ describe('the close', () => {
     expect(l.spotlight).toBeNull();
   });
 
-  it('a tie for first gives two winners', () => {
+  it('with nothing left to count at the close, the finale plays straight away', () => {
     const l = run([
       [0, open(['a'])],
-      [1000, { status: 'closed', leaders: ['a', 'b'] }],
+      [1000, closed(['a'])],
     ]);
-    expect(l.winners).toEqual(['a', 'b']);
+    expect(l.finale).toBe('live');
+  });
+
+  it('plays once: a reading after the finale doesn’t start it again', () => {
+    const played = run([
+      [0, open(['a'])],
+      [1000, closed(['a'])],
+    ]);
+    const later = run([[9000, closed(['a'])]], played);
+    expect(later.finale).toBe('live');
+    expect(nextChangeAt(later)).toBeNull();
   });
 
   it('reopening ends the finale', () => {
     const l = run([
       [0, open(['a'])],
-      [1000, { status: 'closed', leaders: ['a'] }],
+      [1000, closed(['a'])],
       [2000, open(['a'])],
     ]);
     expect(cueOf(l)).toBe('live');

@@ -489,7 +489,10 @@ body {
   border-radius: 6px;
   /* z-index needs a positioned box: the overtaking row draws above the rows it passes. */
   position: relative;
-  transition: filter 1s ease;
+  /* Its own layers, moving or not: otherwise the leader's glow (z-index -1) paints beneath the
+     panel at rest and over it while a transform runs, and its brightness jumps on every overtake. */
+  isolation: isolate;
+  transition: opacity 1s ease;
 }
 /* The lift (F31): while a row overtakes, a deep shadow and an accent edge fade in under it
    (opacity only), then fade out as it settles. */
@@ -556,9 +559,9 @@ body {
     transform: translateY(-10px);
   }
 }
-/* Contest closed: everyone but the winner cools over a second. */
+/* Contest closed: everyone but the winner steps back over a second (opacity only: CLAUDE.md). */
 .board[data-contest="closed"] .row:not([data-leader]) {
-  filter: saturate(0.45);
+  opacity: 0.62;
 }
 .row-rank {
   font:
@@ -576,6 +579,9 @@ body {
   display: inline-block;
   overflow: hidden;
   vertical-align: bottom;
+  /* Grows on the podium (F39). */
+  transform-origin: right center;
+  transition: transform var(--dur-smooth) var(--ease-spring);
 }
 .row-rank-roll > span {
   display: inline-block;
@@ -613,6 +619,8 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  transform-origin: left center;
+  transition: transform var(--dur-smooth) var(--ease-spring);
 }
 .row-meta {
   display: flex;
@@ -634,11 +642,14 @@ body {
   color: var(--ink);
 }
 .row-total {
+  display: inline-block;
   font:
     700 clamp(30px, 5vw, 44px) / 1 var(--font-display),
     sans-serif;
   font-variant-numeric: tabular-nums;
   text-align: right;
+  transform-origin: right center;
+  transition: transform var(--dur-smooth) var(--ease-spring);
 }
 
 /* Layout toggle (F24) --------------------------------------------------- */
@@ -663,6 +674,8 @@ body {
 }
 .board-layout[data-idle]:not(:focus-within) {
   opacity: 0;
+  /* Hidden means hidden: a tap on a touch screen wakes it rather than switching layout unseen. */
+  pointer-events: none;
 }
 .board-layout button {
   position: relative;
@@ -702,11 +715,14 @@ body {
 }
 
 /* Card grid (F24): the same row element and children as the list, rearranged. ------------ */
+/* Twelve tracks (F39): the podium's three cards fill the first row (4 each), the rest follow
+   four to a row (3 each), three on a narrower screen, two on a phone. */
 .board-rows[data-layout="grid"] {
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  grid-template-columns: repeat(12, minmax(0, 1fr));
   gap: 12px;
 }
 .row[data-layout="grid"] {
+  grid-column: span 3;
   grid-template-columns: 1fr auto;
   grid-template-areas:
     "stripe stripe"
@@ -772,6 +788,100 @@ body {
   font-size: clamp(28px, 3.4vw, 36px);
 }
 
+/* The podium (F39): the first three places with votes stand out. They're taller, with a larger
+   avatar; their name, rank and score grow with a transform, so a row stepping on or off the
+   podium resizes smoothly on the compositor (only transform and opacity move on the board).
+   Silver and bronze rims join the leader's gold. */
+.row[data-podium] {
+  grid-template-columns: 2.6rem 6px 64px minmax(0, 1fr) auto;
+  gap: 0 26px;
+  padding-block: 15px;
+}
+.row[data-podium] .row-avatar {
+  width: 64px;
+  height: 64px;
+}
+.row[data-podium] .row-who {
+  gap: 8px;
+}
+.row[data-podium] .row-name {
+  /* Scaled, it fills its column exactly: the ellipsis comes where it would at full size. */
+  max-width: calc(100% / 1.16);
+  transform: scale(1.16);
+}
+.row[data-podium] .row-total {
+  transform: scale(1.18);
+}
+.row[data-podium] .row-rank-roll {
+  transform: scale(1.2);
+}
+.row[data-podium="2"] {
+  border-color: rgb(206 214 228 / 0.55);
+  box-shadow:
+    inset 0 1px 0 rgb(230 236 246 / 0.35),
+    0 12px 30px -18px rgb(0 0 0 / 0.9);
+}
+.row[data-podium="2"] .row-rank {
+  color: #d5dce8;
+}
+.row[data-podium="3"] {
+  border-color: rgb(214 146 92 / 0.55);
+  box-shadow:
+    inset 0 1px 0 rgb(240 180 130 / 0.3),
+    0 12px 30px -18px rgb(0 0 0 / 0.9);
+}
+.row[data-podium="3"] .row-rank {
+  color: #e0a070;
+}
+/* A tie for first without the glow still wears gold. */
+.row[data-podium="1"]:not([data-leader]) {
+  border-color: color-mix(in srgb, var(--gold) 60%, transparent);
+}
+.row[data-podium="1"] .row-rank {
+  color: var(--gold);
+}
+.row[data-layout="grid"][data-podium] {
+  grid-column: span 4;
+  grid-template-columns: 1fr auto;
+  gap: 14px 0;
+  padding: 0 18px 16px;
+}
+.row[data-layout="grid"][data-podium] .row-avatar {
+  width: 136px;
+  height: 136px;
+}
+.row[data-layout="grid"] .row-name {
+  transform-origin: center;
+}
+.row[data-layout="grid"][data-podium] .row-name {
+  max-width: calc(100% / 1.16);
+}
+.row[data-layout="grid"] .row-rank-roll {
+  transform-origin: left center;
+}
+@media (max-width: 839px) {
+  .row[data-layout="grid"] {
+    grid-column: span 4;
+  }
+}
+@media (max-width: 560px) {
+  .row[data-layout="grid"] {
+    grid-column: span 6;
+  }
+  .row[data-layout="grid"][data-podium] {
+    grid-column: span 12;
+  }
+  .row[data-podium] {
+    grid-template-columns: 1.8rem 5px 48px minmax(0, 1fr) auto;
+    gap: 0 18px;
+    padding-block: 12px;
+  }
+  .row[data-podium] .row-avatar {
+    width: 48px;
+    height: 48px;
+  }
+}
+
 /* Votes per minute (F17): a compact strip under the standings; the list stays the hero. */
 .board-chart {
   display: grid;
@@ -821,16 +931,14 @@ body {
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
+/* Connection lost (F11): the last totals stay, dimmed (opacity only: CLAUDE.md). */
 .board-rows,
 .board-count-value {
-  transition:
-    opacity 300ms ease,
-    filter 300ms ease;
+  transition: opacity 300ms ease;
 }
 .board[data-stale] .board-rows,
 .board[data-stale] .board-count-value {
   opacity: 0.5;
-  filter: saturate(0.3);
 }
 
 @media (max-width: 520px) {

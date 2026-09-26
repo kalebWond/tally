@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { type CSSProperties, useEffect, useMemo, useRef, useState } from 'react';
 import { backlogParts } from '@/lib/backlog-text';
 import { advance, cueOf, initialLighting, type Lighting, nextChangeAt } from '@/lib/lighting';
-import { EXIT, GENTLE, SNAPPY } from '@/lib/motion';
+import { APPEAR, SNAPPY } from '@/lib/motion';
 import { type Movement, movements } from '@/lib/movement';
 import { type Entrant, rank, titleSize, unknownIds } from '@/lib/standings';
 import { AnimatedNumber } from './animated-number';
@@ -126,12 +126,17 @@ function useMovements(orderKey: string) {
  * when a hold or a spotlight runs out. Starts from the first snapshot: before it, who leads is
  * unknown.
  */
-function useLighting(status: ContestStatus, leaders: readonly string[], synced: boolean) {
+function useLighting(
+  status: ContestStatus,
+  leaders: readonly string[],
+  counted: boolean,
+  synced: boolean,
+) {
   const [lighting, setLighting] = useState<Lighting>(initialLighting);
   const key = leaders.join(',');
   useEffect(() => {
     if (!synced) return;
-    const input = { status, leaders: key ? key.split(',') : [] };
+    const input = { status, leaders: key ? key.split(',') : [], counted };
     let timer: ReturnType<typeof setTimeout> | undefined;
     const step = () => {
       setLighting((l) => {
@@ -144,7 +149,7 @@ function useLighting(status: ContestStatus, leaders: readonly string[], synced: 
     };
     step();
     return () => clearTimeout(timer);
-  }, [status, key, synced]);
+  }, [status, key, counted, synced]);
   return lighting;
 }
 
@@ -240,7 +245,10 @@ export function LiveStandings({ contest, entrants, gatewayUrl, initialLayout }: 
     () => standings.filter((s) => s.rank === 1 && s.total > 0).map((s) => s.id),
     [standings],
   );
-  const lighting = useLighting(contestStatus, leaders, synced);
+  // Every vote accepted so far is counted (F39): the finale waits for it after the close. The
+  // queue is shared by all contests; unknown (no consumer reporting) counts as not yet.
+  const counted = backlog !== null && backlog.pending === 0;
+  const lighting = useLighting(contestStatus, leaders, counted, synced);
   // Before the first snapshot the lighting knows nothing: light the stage for the status alone.
   const cue =
     lighting.status === null
@@ -258,18 +266,12 @@ export function LiveStandings({ contest, entrants, gatewayUrl, initialLayout }: 
         : HOUSE_COLOURS,
     [lit],
   );
-  const codeOf = (id: string | undefined) => entrants.find((e) => e.id === id)?.code;
-  const aimFor =
+  // Only a lead change aims the beams, both crossing on the new leader. The finale doesn't aim:
+  // the beams wander (F39).
+  const aimCode =
     cue === 'spotlight'
-      ? [lighting.spotlight?.target, lighting.spotlight?.target]
-      : cue === 'finale'
-        ? [lighting.winners[0], lighting.winners[1] ?? lighting.winners[0]]
-        : [];
-  const [aimLeft, aimRight] = aimFor.map(codeOf);
-  const aimAt = useMemo(
-    () => (aimLeft && aimRight ? ([aimLeft, aimRight] as const) : null),
-    [aimLeft, aimRight],
-  );
+      ? entrants.find((e) => e.id === lighting.spotlight?.target)?.code
+      : undefined;
 
   // A contestant added after load (F14) has totals but no details: re-run the server
   // component to fetch them. Client state, including the live totals, survives the refresh.
@@ -293,7 +295,7 @@ export function LiveStandings({ contest, entrants, gatewayUrl, initialLayout }: 
       <Stage
         colours={colours}
         cue={cue}
-        aimAt={aimAt}
+        aimAt={aimCode ?? null}
         settled={lighting.finale === 'settled' || lighting.status === null}
         samples={samples}
       />
@@ -346,12 +348,9 @@ export function LiveStandings({ contest, entrants, gatewayUrl, initialLayout }: 
                   className="board-backlog"
                   data-testid="backlog"
                   title="Votes accepted but not yet counted, across all live contests."
-                  initial={{ opacity: 0, y: -4 }}
-                  animate={{ opacity: 1, y: 0, transition: GENTLE }}
-                  exit={{ opacity: 0, y: -4, transition: EXIT }}
+                  {...APPEAR}
                 >
-                  Counting <AnimatedNumber value={counting.pending} /> queued {counting.noun}
-                  {counting.left && ` · ${counting.left}`}
+                  Counting <AnimatedNumber value={counting.pending} /> {counting.rest}
                 </motion.span>
               )}
             </AnimatePresence>
@@ -370,6 +369,7 @@ export function LiveStandings({ contest, entrants, gatewayUrl, initialLayout }: 
             index={i}
             synced={synced}
             leader={i === 0 && s.total > 0}
+            podium={i < 3 && s.total > 0 ? (s.rank as 1 | 2 | 3) : undefined}
             movement={moving.get(s.id)?.dir}
           />
         ))}
