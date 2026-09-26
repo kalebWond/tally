@@ -492,7 +492,6 @@ body {
   /* Its own layers, moving or not: otherwise the leader's glow (z-index -1) paints beneath the
      panel at rest and over it while a transform runs, and its brightness jumps on every overtake. */
   isolation: isolate;
-  transition: opacity 1s ease;
 }
 /* The lift (F31): while a row overtakes, a deep shadow and an accent edge fade in under it
    (opacity only), then fade out as it settles. */
@@ -558,10 +557,6 @@ body {
     opacity: 0;
     transform: translateY(-10px);
   }
-}
-/* Contest closed: everyone but the winner steps back over a second (opacity only: CLAUDE.md). */
-.board[data-contest="closed"] .row:not([data-leader]) {
-  opacity: 0.62;
 }
 .row-rank {
   font:

@@ -12,18 +12,10 @@ function withDeadline<T>(promise: Promise<T>, ms: number): Promise<T> {
   return Promise.race([promise, deadline]).finally(() => clearTimeout(timer));
 }
 
-const codeOf = (original: unknown) =>
-  typeof original === 'object' &&
-  original !== null &&
-  'code' in original &&
-  typeof original.code === 'string'
-    ? original.code
-    : undefined;
-
 /**
  * Publishes to `votes.dead` and resolves only once the broker has acknowledged every message.
- * Keyed by the original code where there is one, so a contestant's dead letters stay ordered
- * on one partition; keyless (malformed) messages spread across partitions.
+ * Keyed by the dead letter's idempotency key, like `votes.raw` (F35), so they spread evenly; a
+ * malformed message's key is its `offset:topic/partition/offset`.
  */
 export function createDeadLetterPublisher({
   brokers,
@@ -51,10 +43,11 @@ export function createDeadLetterPublisher({
     async publish(events: DeadLetterEvent[]) {
       if (events.length === 0) return;
       const send = producer.send({
-        messages: events.map((e) => {
-          const key = codeOf(e.original);
-          return { topic, value: JSON.stringify(e), ...(key && { key }) };
-        }),
+        messages: events.map((e) => ({
+          topic,
+          key: e.idempotency_key,
+          value: JSON.stringify(e),
+        })),
       });
       await withDeadline(send, PUBLISH_DEADLINE_MS);
     },

@@ -137,7 +137,7 @@ export async function processBatch(messages: InboundMessage[], deps: Deps): Prom
     const inserted = votes.length
       ? await tx
           .insert(schema.votes)
-          .values(votes)
+          .values(byKey(votes))
           .onConflictDoNothing({ target: schema.votes.idempotencyKey })
           .returning({
             contestantId: schema.votes.contestantId,
@@ -149,10 +149,17 @@ export async function processBatch(messages: InboundMessage[], deps: Deps): Prom
     for (const { contestantId } of inserted) {
       if (contestantId) increments.set(contestantId, (increments.get(contestantId) ?? 0) + 1);
     }
+    // Shared rows are upserted in a fixed order (contestant, then minute). Several consumers (F37)
+    // update the same rows; taken in arrival order, two batches can lock them in opposite orders
+    // and deadlock.
     if (increments.size) {
       await tx
         .insert(schema.voteTotals)
-        .values([...increments].map(([contestantId, total]) => ({ contestantId, total })))
+        .values(
+          [...increments]
+            .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+            .map(([contestantId, total]) => ({ contestantId, total })),
+        )
         .onConflictDoUpdate({
           target: schema.voteTotals.contestantId,
           set: {
@@ -179,7 +186,15 @@ export async function processBatch(messages: InboundMessage[], deps: Deps): Prom
     if (perMinute.size) {
       await tx
         .insert(schema.voteBuckets)
-        .values([...perMinute.values()])
+        .values(
+          [...perMinute.values()].sort((a, b) =>
+            a.contestantId < b.contestantId
+              ? -1
+              : a.contestantId > b.contestantId
+                ? 1
+                : a.bucketMinute.getTime() - b.bucketMinute.getTime(),
+          ),
+        )
         .onConflictDoUpdate({
           target: [schema.voteBuckets.contestantId, schema.voteBuckets.bucketMinute],
           set: { count: sql`${schema.voteBuckets.count} + excluded.count` },
@@ -190,7 +205,7 @@ export async function processBatch(messages: InboundMessage[], deps: Deps): Prom
     if (dead.length) {
       await tx
         .insert(schema.deadLetters)
-        .values(dead)
+        .values(byKey(dead))
         .onConflictDoNothing({ target: schema.deadLetters.idempotencyKey });
       // Read back, not the in-memory copies: an earlier delivery may already have written the
       // row, and the topic must carry the same failed_at as the table.
@@ -235,6 +250,14 @@ export async function processBatch(messages: InboundMessage[], deps: Deps): Prom
 
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 
+/**
+ * Rows in idempotency-key order. After a rebalance an old and a new owner can briefly hold the
+ * same messages from several partitions; inserted in arrival order, they could take the unique
+ * index's locks in opposite orders and deadlock (Postgres would abort one, and it would retry).
+ */
+const byKey = <T extends { idempotencyKey?: string | null | undefined }>(rows: T[]) =>
+  [...rows].sort((a, b) => ((a.idempotencyKey ?? '') < (b.idempotencyKey ?? '') ? -1 : 1));
+
 const minuteOf = (d: Date) => new Date(Math.floor(d.getTime() / 60_000) * 60_000);
 
 async function readTotals(
@@ -242,61 +265,56 @@ async function readTotals(
   contestantIds: string[],
   minutes: Date[],
 ): Promise<ContestTotals[]> {
-  const { contestants, voteTotals } = schema;
+  // Per contestant only: this transaction holds the lock on every row it upserted, so these read
+  // back exact. Contest-wide figures are summed in Redis (totals-store.ts).
+  const { contestants, voteTotals, voteBuckets } = schema;
   const rows = await tx
     .select({
       contestId: contestants.contestId,
       contestantId: voteTotals.contestantId,
       total: voteTotals.total,
-      contestTotal:
-        sql<number>`(sum(${voteTotals.total}) over (partition by ${contestants.contestId}))::bigint`.mapWith(
-          Number,
-        ),
     })
     .from(voteTotals)
     .innerJoin(contestants, sql`${contestants.id} = ${voteTotals.contestantId}`)
-    .where(
-      inArray(
-        contestants.contestId,
-        tx
-          .selectDistinct({ id: contestants.contestId })
-          .from(contestants)
-          .where(inArray(contestants.id, contestantIds)),
-      ),
-    );
+    .where(inArray(voteTotals.contestantId, contestantIds));
 
   const byContest = new Map<string, ContestTotals>();
-  const wanted = new Set(contestantIds);
+  const contestOf = new Map<string, string>();
   for (const r of rows) {
     const entry = byContest.get(r.contestId) ?? {
       contestId: r.contestId,
       totals: new Map<string, number>(),
-      totalVotes: r.contestTotal,
-      minutes: new Map<number, number>(),
+      minutes: new Map<number, Map<string, number>>(),
     };
-    if (wanted.has(r.contestantId)) entry.totals.set(r.contestantId, r.total);
+    entry.totals.set(r.contestantId, r.total);
     byContest.set(r.contestId, entry);
+    contestOf.set(r.contestantId, r.contestId);
   }
 
-  // Absolute per-minute counts for the minutes this batch touched, contest-wide.
-  if (minutes.length && byContest.size) {
-    const { voteBuckets } = schema;
-    const rows = await tx
+  // Absolute per-contestant counts for the minutes this batch touched.
+  if (minutes.length && rows.length) {
+    const buckets = await tx
       .select({
-        contestId: contestants.contestId,
+        contestantId: voteBuckets.contestantId,
         minute: voteBuckets.bucketMinute,
-        count: sql<number>`sum(${voteBuckets.count})::int`,
+        count: voteBuckets.count,
       })
       .from(voteBuckets)
-      .innerJoin(contestants, sql`${contestants.id} = ${voteBuckets.contestantId}`)
       .where(
         and(
-          inArray(contestants.contestId, [...byContest.keys()]),
+          inArray(voteBuckets.contestantId, contestantIds),
           inArray(voteBuckets.bucketMinute, minutes),
         ),
-      )
-      .groupBy(contestants.contestId, voteBuckets.bucketMinute);
-    for (const r of rows) byContest.get(r.contestId)?.minutes.set(r.minute.getTime(), r.count);
+      );
+    for (const b of buckets) {
+      const contestId = contestOf.get(b.contestantId);
+      const entry = contestId ? byContest.get(contestId) : undefined;
+      if (!entry) continue;
+      const minute = b.minute.getTime();
+      const counts = entry.minutes.get(minute) ?? new Map<string, number>();
+      counts.set(b.contestantId, b.count);
+      entry.minutes.set(minute, counts);
+    }
   }
   return [...byContest.values()];
 }

@@ -29,6 +29,7 @@ TypeScript everywhere except the Go load generator. Next.js, Tailwind, shadcn/ui
 | Command | Does |
 |---|---|
 | `docker compose --profile app up -d --build` | Full stack in containers (demos, checks, Dockerfiles) |
+| `INGEST_REPLICAS=2 CONSUMER_REPLICAS=3 docker compose --profile app up -d` | Replicas (or set them in `.env`); nginx (`ingest-proxy`) owns port 4000 |
 | `docker compose up -d` | Infrastructure only; then `pnpm dev` and `go run .` in `tools/generator` on the host (reads `.env`) |
 | `pnpm check:health` | Every service's `/health` |
 | `pnpm lint`, `pnpm typecheck`, `pnpm test` | Biome, TypeScript, Vitest (the Kafka and DB tests need the infrastructure up) |
@@ -40,11 +41,14 @@ TypeScript everywhere except the Go load generator. Next.js, Tailwind, shadcn/ui
 | `pnpm load <smoke\|steady\|spike>` | k6 in the compose network, then zero-loss and reconciliation checks; report in `load-results/` |
 | `pnpm recap [contestId]` | Render a contest's recap video into `recaps/` |
 | `pnpm bench:clickhouse` | Benchmark the analytics queries |
+| `pnpm generator:exe` | Build the generator as a Windows program for a second machine (`tools/generator/bin/`, gitignored) |
 
-- **Addresses:** containers reach Redpanda at `redpanda:9092`, the host at `localhost:19092`. A one-shot `topics` job creates `votes.raw` and `votes.dead` (6 partitions) on every `docker compose up`. ClickHouse: `curl 'http://localhost:8123/?user=tally&password=tally&database=tally' --data-binary 'SELECT …'`.
+- **Addresses:** containers reach Redpanda at `redpanda:9092`, the host at `localhost:19092`. A one-shot `topics` job creates `votes.raw` and `votes.dead` with `TOPIC_PARTITIONS` partitions (default 24), and raises existing topics to it; partitions can't be removed. When the count changes, compose restarts the consumers so they're assigned the new partitions. Votes are keyed by idempotency key. ClickHouse: `curl 'http://localhost:8123/?user=tally&password=tally&database=tally' --data-binary 'SELECT …'`.
 - **Imports:** `packages/*` import each other with `.ts` extensions (Turbopack can't map `.js` → `.ts`); services use `.js`. A bundled workspace package's runtime deps must also be the app's deps.
 - **Contracts:** after changing one the generator speaks, run `pnpm --filter @tally/contracts export-schemas`.
-- **Grafana:** the dashboard is generated: edit `scripts/grafana-dashboard.py`, run it, commit the JSON. Prometheus reads its config only at startup; restart it after editing.
+- **Grafana:** the dashboard is generated: edit `scripts/grafana-dashboard.py`, run it, commit the JSON. Prometheus finds ingest and consumer replicas by DNS; it reads its config only at startup, so restart it after editing.
+- **Replicas:** they publish no host port, so `check-health.sh` checks each from inside its container. Shared rows (`vote_totals`, `vote_buckets`) and inserts are written in a fixed order, or two consumers can deadlock. The consumer writes only per-contestant values to Redis; `totalVotes` and the minutes are summed from them in one Lua script (`totals-store.ts`). Contest-wide sums read in Postgres would miss other consumers' uncommitted votes.
+- **Two devices:** to run the generator on another machine, uncomment `COMPOSE_FILE=compose.yaml:compose.two-device.yaml` and `GENERATOR_HOST=<its address>` in `.env`. No local generator runs then, and web and Prometheus reach that machine as `generator`. The scripts read `GENERATOR_HOST` and stop the remote run before a wipe or a load test.
 - **ClickHouse schema:** changes are new entries in `MIGRATIONS` (`services/analytics-consumer/src/schema.ts`), never edits to applied ones.
 - **Remotion:** keep every `remotion` / `@remotion/*` package on one version; `tools/recap` and `packages/recap-video` pin zod 4.5.4 for it.
 - **New services:** every new service gets a Dockerfile and a compose entry under the `app` profile.
@@ -114,8 +118,7 @@ infra/                      migrations, ClickHouse, Prometheus and Grafana confi
 
 Update this section as you go.
 
-- **Branches:** `main` runs everything on one machine. The branch `two-device` (F35–F38: partition key, ingest and consumer replicas, a generator on a second device) isn't merged: a review found a bug there with several consumers (`IMPLEMENTATION_PLAN.md`).
-- **Last completed:** F39, podium and a finale on the true result (2026-09-26), with a code-review round on F31–F32 and a clean-up of these docs.
+- **Last completed:** F35–F38 (partition key, ingest and consumer replicas, generator on a second device), hardened after a code review and merged into `main` (2026-09-26), after F39 (podium and a finale on the true result) and a clean-up of these docs. The branch `two-device` is merged and can be deleted.
 - **Next up:** nothing required. Optional: F33 (deployment: needs a host, a domain and permission) and F40–F42 (Kubernetes).
 - **Seed contest:** `0192f3a0-7c1e-7000-8000-00000000c0de` ("Tally Showcase"), codes `C1`–`C10`, closed and empty between checks. The README's media was recorded from it.
 - **Known gaps:**

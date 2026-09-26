@@ -36,7 +36,7 @@ Entries are in build order under `## F<n> — …` headings; find a feature's wi
 - **F24:** One element tree, two arrangements · how it was verified
 - **F25:** Recap video: Remotion, fed by Postgres, deterministic bar race · how it was verified
 - **Tooling:** `pnpm reset:votes` wipes vote data, keeps contests
-- **Plans:** Three admin features before deployment (F26–F28) · Counting backlog (F29) · UI polish (F30) · Lively UI (F31) · Stage look (F32)
+- **Plans:** Three admin features before deployment (F26–F28) · Counting backlog (F29) · UI polish (F30) · Lively UI (F31) · Stage look (F32) · Partition votes evenly (F35) and scale out counting (F37, was F36)
 - **F26:** Contests are created as drafts and deleted only as drafts · how it was verified
 - **F27:** Sample contestants: a review list, added all together · how it was verified
 - **F28:** Recap in the browser: one component, played by Remotion's player · how it was verified
@@ -46,7 +46,11 @@ Entries are in build order under `## F<n> — …` headings; find a feature's wi
 - **F32:** Stage look: what building it turned up · how it was verified
 - **F34:** README: a clip first, then the case
 - **Other:** Code review after F34
-- **F39:** Podium and a finale on the true result: what building it turned up · how it was verified
+- **F39:** Podium and a finale on the true result: what building it turned up · how it was verified · The podium and finale with replicas
+- **F35:** how it was verified
+- **F36:** Ingest replicas behind nginx · how it was verified
+- **F37:** Scale out counting: what building it turned up · how it was verified · Hardening the replicas before merging into `main`
+- **F38:** Generator on a second device: plain program, compose override · how it was verified · The run from the Windows machine
 
 ---
 
@@ -965,3 +969,173 @@ Headless Chrome against the `app` stack, on four test contests ("F39 Check 3/7/1
 - **Reload:** cue `finale` and no confetti.
 - **No console errors.** Lint, typecheck and the web tests pass: 103, including 6 new lighting tests. Before the implementation, the new tests failed as expected.
 
+## Plan — Partition votes evenly (F35) and scale out counting (F37, was F36)
+**Context:** a discussion of running Tally for real traffic, with votes arriving from partner platforms instead of the generator. At 10,000 votes/s from the generator, the one consumer falls behind. Nothing is lost, and the totals catch up once the generator stops. So more counting capacity has to come from more consumers, and two things stand in the way:
+- **The partition key.** Votes are keyed by contestant code (F4), so a contestant's votes all go to one partition. With the ten seed codes, four share partition 2 and none lands on partition 1. Extra consumers get uneven shares, and a popular contestant loads a single partition and a single consumer.
+- **The compose file.** The consumer publishes a fixed host port, so a second replica can't start, and Prometheus scrapes a single address.
+
+**Decided:**
+- **Key both topics by `idempotency_key`.** Every vote has a different key, so `murmur2(key) mod n` spreads them evenly: 600,000 random keys over 6 partitions came out within half a percent of a sixth each. This supersedes F4's key.
+- **Partitions from `TOPIC_PARTITIONS`, default 24.** It divides evenly among 1, 2, 3, 4, 6, 8 or 12 consumers. Partitions can be added but never removed, and `pnpm reset:votes` recreates the topics through the `topics` job, so the count belongs in configuration, not in a one-off `rpk` command.
+- **Split in two, at the user's request.** F35 is only the key and the partition count. With one consumer, batches are processed and committed one at a time, so no two transactions update the same rows at once: nothing else has to change. F37 (was F36) adds the consumers and what they need.
+- **F37: upsert rows in a fixed order.** With code keys, no two consumers touched the same contestant's row. With spread keys, every batch updates every contestant's `vote_totals` and `vote_buckets` rows, in the order its votes arrived. Two consumers could then lock C1 and C2 in opposite orders and deadlock. Postgres would abort one, and the retry would count it correctly, but slowly. Sorting the rows by contestant first means the locks are always taken in the same order.
+- **F37: a scalable consumer in compose.** No fixed host port, Prometheus DNS service discovery, and the health check runs inside the container.
+
+**Why the order F4 bought isn't needed:**
+- **Totals are sums.** Postgres updates a contestant's row under its row lock, so concurrent batches take turns.
+- **Redis only accepts a higher total** (`SET_IF_HIGHER`), so a slower consumer can't move a count backwards.
+- **Closing goes by acceptance time** (`sent_at` against `closes_at`, F16), not by queue order.
+- **Already safe with several consumers:** the backlog (F29) and the startup resync (F17) were written for more than one consumer.
+
+**Alternatives:**
+- **Keep code keys:** per-contestant order, which nothing uses, at the cost of uneven load.
+- **No key (round robin):** it spreads too, but a retried publish can land on another partition. With the idempotency key, a retry lands on the same one.
+- **48 partitions:** it works, but it buys headroom that nothing here needs. One consumer on the laptop already manages somewhere between 3,000 and 10,000 votes/s.
+
+**The next limit:** with the votes spread, every consumer updates the same few `vote_totals` rows. Each batch already sums its votes per contestant first, so that's one update per contestant per batch. That's fine for a handful of consumers. Beyond that, the fix is one totals row per consumer, summed on read, and only if a measurement shows the contention.
+
+## F35 — How the done-when was verified
+Against the full `app` stack on the laptop, on 2026-09-25.
+- **Raising existing topics:** the stack had been stopped with 6-partition topics. `docker compose --profile app up -d --build` ran the new `topics` job, which found both topics at 6 and added 18 partitions to each.
+- **Creating them:** `pnpm reset:votes --yes` (at the user's request: all votes wiped, contests and contestants kept) deleted the topics, and the job recreated them at 24.
+- **Groups:** `tally-consumer` owned all 24 partitions of `votes.raw`, and `tally-analytics` all 24 of both topics.
+- **Spread:** a generator run on Tally Showcase at 3,000 votes/s for 40 s, with 3% invalid codes.
+  - `votes.raw` held 120,084 messages, 4,902 to 5,196 per partition, within −2.0% and +3.8% of the mean.
+  - `votes.dead` held 3,660, from 131 to 180 per partition. That's wider, but with about 150 each the noise alone is around ±8%.
+- **Counts:**
+  - generator: 120,084 accepted, 0 failed, ingest p95 14 ms
+  - Postgres: 116,424 votes and 3,660 dead letters, summing to 120,084
+  - ClickHouse: 120,084 distinct keys
+  - both groups at zero lag afterwards; `pnpm reconcile` found no drift
+- **Tests:** the ingest publisher test now checks three things. Votes are keyed by idempotency key. A leader with 120 votes lands on every partition. A retry with the same key, from a second publisher, lands on the same partition. The dead-letter test checks the new key, including a malformed message's `offset:` key. The ingest and consumer suites pass (71 tests), as do lint and typecheck.
+- **Afterwards:** the test votes were wiped with `pnpm reset:votes --yes`, and Showcase is closed again.
+
+## F36 — Ingest replicas behind nginx
+**Context:** a peak measurement (`load-results/consumer-peak.md`) pushed the generator's maximum, 20,000 votes/s, at the full stack.
+- **Ingest was the first limit:** one full thread at about 4,200/s.
+- **The consumer came second:** about 4,000/s with the laptop loaded, 6,000/s without.
+- **Shared rows barely matter:** the consumer holds them locked for about 5% of each batch, so contention among several consumers would bite only at around 80,000/s.
+- **Disk stalls:** twice, counting nearly stopped while COMMIT waited on the disk (`IO:WalSync`). Postgres, Redpanda and ClickHouse share the laptop's SSD.
+- **F35 exonerated:** a lead from one earlier sample, that F35 made ingest 2.4× costlier per vote, didn't survive a controlled run at 6 partitions. The consumer was the same at either count, and ingest was at most about 9% cheaper at 6.
+
+**Decided:**
+- **Replicas:** ingest runs as `INGEST_REPLICAS` replicas (default 1) behind `ingest-proxy`, which takes port 4000. The replicas publish no host port, so `--scale` works.
+- **nginx 1.30.5 as the proxy** (`infra/nginx/ingest.conf`):
+  - `server ingest:4000 resolve` re-reads the replicas from Docker's DNS every 5 s, so scaling needs no reload.
+  - Connections to the replicas stay open.
+  - 2 worker processes.
+  - A replica that refuses the connection is skipped. POST isn't retried once sent, since ingest may already have published the vote, and a client's retry is safe through its `Idempotency-Key`.
+- **Clients:** the generator and k6 call the proxy.
+- **Prometheus:** discovers the replicas through DNS (`dns_sd_configs`). The dashboard already sums ingest's metrics across instances.
+
+**Alternatives:**
+- **Docker's DNS alone:** clients keep their connections open, so each one would stick to one replica.
+- **Node's `cluster` in one container:** it uses more cores without a proxy, but hides the replicas from metrics, and it isn't how Kubernetes or a cloud host scales.
+- **A batch endpoint (`POST /votes/batch`):** it may cut the per-request cost a lot, but it changes the public contract, and ingest hasn't been profiled to show that the cost is per-request. It stays a later option.
+- **Caddy or Traefik:** they would do the same. nginx is the most familiar, and its `resolve` option (open source since 1.27.3) covers dynamic replicas.
+
+**Why no code changed:** ingest is stateless. Dedupe is the consumer's unique key, each replica's producer has its own ID from Redpanda, and every replica reads the same salt from the environment. It was built for this, and scaling it is configuration only.
+
+## F36 — How the done-when was verified
+Details and tables are in `load-results/ingest-replicas.md`.
+- **Method:** both consumers were stopped. The generator ran for 90 s at 20,000/s asked, at each of 1, 2 and 3 replicas (`--scale ingest=N`).
+- **Accepted:** 6,565, 7,214 and 8,263 votes/s (+10% and +26%), with 0 failures.
+- **Spread:** nginx spread the load evenly, with each replica at about one full thread.
+- **Why the gain was modest:** at 3 replicas the containers used 5.4 of 8 logical threads on the laptop's 4 physical cores, and each replica's throughput fell from 6,565/s alone to about 2,750/s. The generator (1.4 threads) and nginx (0.8) compete for the same cores. The real scaling needs the generator on another machine, or a real host.
+- **Counts:** after the drain (293 s, one consumer), 1,983,844 accepted = 1,983,844 in Postgres = 1,983,844 in ClickHouse, with no dead letters. `pnpm reconcile` found no drift.
+- **Found on the way:** Prometheus reads its config only at startup. During the runs it still scraped the old single `ingest:4000` target, so the figures came from the generator and Postgres instead. After a restart it found all three replicas. The note is in CLAUDE.md.
+- **Afterwards:** the test votes were wiped with `pnpm reset:votes --yes`, which also scaled ingest back to 1 replica. Showcase is closed. Lint and the health check pass.
+
+## F37 — Scale out counting: what building it turned up
+**Decided:** as planned in "Plan — Partition votes evenly (F35) and scale out counting (F37, was F36)".
+- `CONSUMER_REPLICAS` replicas (default 1), no host port.
+- Prometheus discovers them through DNS.
+- `check-health.sh` checks each replica with `docker compose exec --index N`, running Node's `fetch` inside it.
+- `processBatch` upserts `vote_totals` rows sorted by contestant, and `vote_buckets` rows by contestant then minute.
+
+**The deadlock was real, and the first test missed it.**
+- **Two batches in opposite orders:** passed without the fix. The upsert takes under a millisecond, so two transactions rarely interleave inside it.
+- **Six batches at once, in random contestant orders, 30 rounds:** failed with `deadlock detected` on the unsorted code, and passes (three runs) with the rows sorted. That's the test kept.
+- **In production:** under sustained load, thousands of batches an hour make even a rare interleaving certain. Postgres would abort one side and the retry would still count correctly, but it costs a batch and a pause.
+
+**Not sorted:** `votes` and `dead_letters` inserts. Their keys differ between consumers, except in a redelivery during a rebalance, and then both copies are in the same partition order.
+
+## F37 — How the done-when was verified
+Details and tables are in `load-results/consumer-replicas.md`.
+- **Method:** the whole stack ran, with 2 ingest replicas. For each count of 1, 2 and 3 consumers, the generator asked for 20,000/s for 90 s, then the backlog drained.
+- **Partitions:** 24, then 12/12, then 8/8/8.
+- **Accepted/s:** 7,699, 5,120 and 4,634.
+- **Counted/s:** 3,801, 4,708 and 4,626.
+- **Backlog peak:** 368,075 votes (drained in 69 s), then 52,273 (10 s), then none.
+- **Counts:** all 1,631,357 accepted votes were counted exactly once (Postgres and ClickHouse), with no drift, no failed batches and no deadlocks.
+- **Deviation:** the plan said 10,000 votes/s. The laptop couldn't deliver it with everything running.
+- **Why total throughput stayed flat:** the laptop was at 5.6–6.1 of 8 logical threads. Each consumer, with its share of Postgres, took CPU from ingest. On this machine, the whole pipeline runs at about 4,700/s however the work is split. What more consumers bought here is a board that keeps up with what's accepted. Adding capacity needs a machine with spare cores.
+- **Afterwards:** the test votes were wiped with `pnpm reset:votes --yes`, which also restarted ingest and the consumer at one replica each. Showcase is closed.
+
+## F38 — Generator on a second device: plain program, compose override
+**Context:** on the laptop, the whole pipeline tops out at about 4,700 votes/s. The generator uses 0.8–1.4 of its 8 threads, competing with the pipeline. The user's second device is a Windows 11 laptop (AMD Ryzen 7 5800H, 8 cores and 16 threads) where Docker wouldn't install.
+
+**Decided:**
+- **The generator runs there as a plain Windows program.** `pnpm generator:exe` cross-compiles it with the existing Go container (`scripts/go.sh` now passes `GOOS`, `GOARCH` and `CGO_ENABLED` through). The result is one static `.exe`, plus a `run-generator.cmd` that sets `INGEST_URL` to this machine's LAN address. The files are copied by hand, so nothing is pushed.
+- **The app machine switches with `compose.two-device.yaml`,** through `COMPOSE_FILE` and `GENERATOR_HOST` in `.env`.
+  - The local generator runs with 0 replicas.
+  - Web and Prometheus resolve `generator` to `GENERATOR_HOST` (`extra_hosts`), so `GENERATOR_URL`, `/control` and the `generator:4002` scrape target stay as they are.
+- **The scripts follow `GENERATOR_HOST`.** `pnpm load` and `pnpm reset:votes` stop the remote run first, since compose can't stop a process on another machine. `check-health.sh` checks it there.
+
+**Alternatives:**
+- **A standalone compose file on the device:** it needs Docker there.
+- **GitHub Codespaces:** it isn't on the LAN. It would need a tunnel exposing the unauthenticated ingest to the internet, and it would measure the tunnel.
+- **Environment variables alone:** Prometheus's config can't read them. Its target would need a second, always-down entry.
+
+**Found on the way: two faults in F36's nginx.** They only appeared with more concurrent connections than F36's test used.
+1. **Descriptors.** The container's default soft limit was 1,024 open files. At 1,024 generator connections nginx failed with `accept4() failed (24: No file descriptors available)`. Fixed with `worker_rlimit_nofile 65536`, a container `ulimits`, and 16,384 connections per worker.
+2. **Connect timeout.** nginx kept only 128 connections to ingest open, so under load it opened new ones to a replica already at full CPU. With a 2 s connect timeout, those turned into failed votes, where calling ingest directly only queued. Fixed by keeping 1,024 connections open, and waiting up to 10 s for a connection (longer than the generator's 8 s limit) so overload shows as latency.
+
+After both fixes, a 256-worker run at 3,000–5,000/s had 0 failures, a p95 of 84 ms and no nginx errors.
+
+**Workers:** the first draft used 1,024. On a LAN, 256 allows about 8,500/s even at 30 ms per request, above what the app machine's pipeline takes, so more only adds queueing. The launcher uses 256.
+
+## F38 — How the app side was verified
+- **Stand-in:** a Linux build of the generator ran on the laptop's host with `GENERATOR_HOST=192.168.1.11`, the laptop's own LAN address. The stack ran with the override: no generator container, and `generator` in web's `/etc/hosts`.
+- **Control and monitoring:** through web's API (the `/control` path), open, status, start, re-rate to 5,000/s and stop all worked. `check-health.sh` reported "generator /health (on 192.168.1.11)" as ok, and Prometheus showed `generator:4002` up.
+- **Counts:** across four check runs, ingest accepted 239,955, and Postgres held 235,112 votes plus 4,843 dead letters, 239,955 in all. `pnpm reconcile` found no drift.
+- **The generator's "failed" requests** (979, from the runs before the nginx fixes) were all accepted too: its 238,976 accepted plus 979 failed also comes to 239,955. Their replies didn't arrive in time, but each vote was published and counted once. A client retry with the same `Idempotency-Key` would have been deduped.
+- **Afterwards:** single-machine mode was restored (the local generator is back, and web has no override) and the test votes were wiped.
+- **Pending:** the run from the Windows machine.
+
+## F38 — The run from the Windows machine
+Details are in `load-results/two-device.md`.
+- **Setup:** the generator on the Windows PC (192.168.1.2, Ryzen 7 5800H) over Wi-Fi. ESET Internet Security needed an inbound rule for TCP 4002, placed at the top of its list. The laptop ran 2 ingest replicas and 2 consumers.
+- **Load:** 10,000/s asked, with a 30 s burst to 20,000/s.
+- **Throughput:** accepted 3,900–4,600/s and counted 3,600–4,200/s. The backlog peaked at 29,211 and drained in under 4 s.
+- **Correctness:** all 761,669 votes accepted = counted plus dead-lettered, with 0 failures and no drift.
+- **The generator was capped at 4,600/s:** 256 workers ÷ ~56 ms per round trip. Ingest itself took ~18 ms at p50. The rest was Wi-Fi, nginx, and queueing on a laptop at 7.5–7.8 of 8 threads.
+- **The launcher's 256 was based on a wrong estimate.** It assumed a 30 ms round trip, and the measured one was 56 ms. The comment now says so, and the setting stays 256: more workers would lift the generator's cap, but not the laptop's.
+- **Conclusion:** no gain over one machine (5,120/s accepted, 4,708/s counted). The laptop's CPU is the ceiling, so going higher needs a host with more cores.
+
+## F39 — The podium and finale with replicas
+**Context:** F39 and the code-review fixes were built on `main`, which has one ingest and one consumer. At the user's request they were brought to this branch, to run with the replicas (F36, F37) and the two-device setup (F38).
+**How:** the branch had never touched `apps/web`, so the web changes applied unchanged, as the diff of `main`'s commits `302e2d8`, `3634e9f` and `c12108b`. The docs were merged by hand.
+**Why it fits the replicas:** the finale waits for "counted", meaning the backlog is empty. The backlog is summed across every consumer's partitions (F29 was built for several consumers), so with 2 or 3 consumers the finale still waits until every queued vote is counted.
+**The known risk carries over:** the code review's medium finding still stands. With several consumers, the contest-wide `totalVotes` and per-minute counts in Redis can stay too low. The podium and the per-contestant totals are unaffected, but the header's "votes cast" can end below the sum of the rows. The branch test checks for it.
+
+## F37 — Hardening the replicas before merging into `main`
+The code review's findings on F35–F37, fixed at the user's request before the branch merges into `main`, where it runs on one machine with replicas.
+- **The contest-wide total and per-minute counts could stay too low with several consumers.**
+  - **Cause:** each batch read `sum(vote_totals)` and per-minute sums for the whole contest inside its own transaction. Two consumers counting different contestants each missed the other's uncommitted votes, and the upward-only write kept the larger of two short sums.
+  - **Fix:** the consumer now writes only per-contestant values, which it reads back from rows its own transaction has locked, so they're exact. One Lua script sums the contest's `totalVotes` and each minute from them, atomically in Redis. Per-contestant minutes live in a new derived key, `tally:{id}:contestant-minutes`, rebuilt at consumer start and by reconcile's repair. The gateway and the board are unchanged.
+  - **The check first:** a test running six concurrent single-contestant batches over 30 rounds failed twice before the fix (header 3,500 and 3,560 of 3,600) and passed five times out of five after.
+  - **Alternatives:**
+    - Taking share locks on the contest's rows: that deadlocks, since each transaction already holds its own rows.
+    - Having the gateway sum the totals hash: that leaves the per-minute chart wrong.
+- **New partitions went uncounted until a consumer restart.** `consumer` and `analytics-consumer` now depend on `topics` with `restart: true`. When `TOPIC_PARTITIONS` changes, compose re-creates the job and restarts both consumers, so they rejoin and are assigned the new partitions. A dry run confirmed it, and an unchanged `up` leaves them running.
+- **Smaller fixes:**
+  - vote and dead-letter inserts sorted by idempotency key, since after a rebalance two owners could briefly hold the same keys
+  - the deadlock test given a 60 s timeout
+  - test teardown waits for the pool's connections to close before dropping the test database, because `pnpm test` exited 1 on a 57P01 in about a quarter of runs; six runs after the fix were all clean
+  - `check-health.sh` checks every ingest replica from inside
+  - the topics job refuses partition counts from `rpk` it can't parse
+  - the scripts survive a missing `.env` and a quoted `GENERATOR_HOST`
+- **At the user's request:**
+  - no dimming at the close: the rows keep their opacity
+  - `.env.example` lists the replica counts, and the two-device lines commented out

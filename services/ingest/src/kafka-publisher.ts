@@ -35,8 +35,9 @@ export function createKafkaPublisher({ brokers, topic }: KafkaPublisherOptions) 
     acks: -1,
     // Broker-side dedupe of our own retries, so a retried batch can't duplicate votes.
     idempotent: true,
-    // Java-compatible murmur2: the same code maps to the same partition as rpk, franz-go and
-    // the Java client would put it, so partition placement can be checked independently.
+    // Java-compatible murmur2, so placement matches rpk, franz-go and the Java client. Keyed by
+    // the idempotency key (F35): votes spread evenly over the partitions whoever is winning, and a
+    // retry with the same key lands on the same partition.
     partitioner: compatibilityPartitioner,
     autocreateTopics: false,
     retries: RETRIES,
@@ -51,7 +52,7 @@ export function createKafkaPublisher({ brokers, topic }: KafkaPublisherOptions) 
   const enqueue = createBatcher<VoteEvent>(
     async (events) => {
       const send = producer.send({
-        messages: events.map((e) => ({ topic, key: e.code, value: JSON.stringify(e) })),
+        messages: events.map((e) => ({ topic, key: e.idempotency_key, value: JSON.stringify(e) })),
       });
       // Past the deadline the caller gets a 503, but the send may still land later. A retry
       // that carries the same Idempotency-Key is then deduped by the consumer.

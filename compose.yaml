@@ -39,15 +39,32 @@ services:
       timeout: 5s
       retries: 20
 
-  # One-shot, idempotent: creates the topics (default profile, so host-run services get them too).
-  # 6 partitions caps the consumer group at 6 parallel instances; raising it later remaps keys.
+  # One-shot, idempotent: creates the topics (default profile, so host-run services get them too)
+  # with TOPIC_PARTITIONS partitions, and raises existing ones to it (F35). The count caps how many
+  # consumers can share a group. Partitions can be added, never removed. Votes are keyed by
+  # idempotency key, so nothing depends on which partition a vote lands on.
   topics:
     image: redpandadata/redpanda:v26.2.3
+    environment:
+      TOPIC_PARTITIONS: ${TOPIC_PARTITIONS:-24}
     entrypoint: ["/bin/sh", "-c"]
     command:
-      - >-
-        rpk topic create votes.raw votes.dead --if-not-exists -p 6 -r 1 -X brokers=redpanda:9092
-        && rpk topic describe votes.raw -p -X brokers=redpanda:9092
+      - |
+        set -eu
+        n="$$TOPIC_PARTITIONS"
+        case "$$n" in ''|*[!0-9]*|0) echo "TOPIC_PARTITIONS must be a positive integer, got '$$n'" >&2; exit 1 ;; esac
+        b="-X brokers=redpanda:9092"
+        rpk topic create votes.raw votes.dead --if-not-exists -p "$$n" -r 1 $$b
+        for t in votes.raw votes.dead; do
+          have=$$(rpk topic list $$b | awk -v t="$$t" '$$1 == t { print $$2 }')
+          case "$$have" in ''|*[!0-9]*) echo "couldn't read $$t's partition count from rpk (got '$$have')" >&2; exit 1 ;; esac
+          if [ "$$have" -lt "$$n" ]; then
+            rpk topic add-partitions "$$t" -n $$((n - have)) $$b
+          elif [ "$$have" -gt "$$n" ]; then
+            echo "warning: $$t has $$have partitions, more than TOPIC_PARTITIONS=$$n; partitions can't be removed" >&2
+          fi
+        done
+        rpk topic list $$b
     depends_on:
       redpanda: { condition: service_healthy }
 
@@ -121,6 +138,23 @@ services:
       redpanda: { condition: service_healthy }
       topics: { condition: service_completed_successfully }
     build: { context: ., dockerfile: services/ingest/Dockerfile }
+    # F36: several replicas behind ingest-proxy, which owns port 4000. No host port here, so they
+    # can scale: INGEST_REPLICAS=3 docker compose --profile app up -d (or --scale ingest=3).
+    deploy:
+      replicas: ${INGEST_REPLICAS:-1}
+
+  # F36: the one entry point for votes. Spreads requests over the ingest replicas, as the host's
+  # load balancer would in production.
+  ingest-proxy:
+    profiles: [app]
+    image: nginx:1.30.5-alpine
+    restart: unless-stopped
+    volumes:
+      - ./infra/nginx/ingest.conf:/etc/nginx/nginx.conf:ro
+    ulimits:
+      nofile: { soft: 65536, hard: 65536 }
+    depends_on:
+      ingest: { condition: service_started }
     ports: ["4000:4000"]
 
   gateway:
@@ -132,11 +166,17 @@ services:
     <<: *node-service
     depends_on:
       redpanda: { condition: service_healthy }
+      # Re-created topics (TOPIC_PARTITIONS raised) restart the consumers, so they're assigned the
+      # new partitions: without a rejoin, votes keyed onto them would sit uncounted.
+      topics: { condition: service_completed_successfully, restart: true }
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
       migrate: { condition: service_completed_successfully }
     build: { context: ., dockerfile: services/consumer/Dockerfile }
-    ports: ["4003:4003"]
+    # F37: several replicas share the tally-consumer group, each taking a share of the partitions.
+    # No host port, so they can scale: CONSUMER_REPLICAS=3 docker compose --profile app up -d.
+    deploy:
+      replicas: ${CONSUMER_REPLICAS:-1}
 
   # Second consumer group (F20): votes.raw + votes.dead → ClickHouse. Live results never wait for it.
   analytics-consumer:
@@ -151,7 +191,9 @@ services:
     depends_on:
       redpanda: { condition: service_healthy }
       clickhouse: { condition: service_healthy }
-      topics: { condition: service_completed_successfully }
+      # Re-created topics (TOPIC_PARTITIONS raised) restart the consumers, so they're assigned the
+      # new partitions: without a rejoin, votes keyed onto them would sit uncounted.
+      topics: { condition: service_completed_successfully, restart: true }
     build: { context: ., dockerfile: services/analytics-consumer/Dockerfile }
     ports: ["4004:4004"]
 
@@ -231,9 +273,9 @@ services:
     build: { context: tools/generator }
     ports: ["4002:4002"]
     environment:
-      INGEST_URL: http://ingest:4000
+      INGEST_URL: http://ingest-proxy:4000
     depends_on:
-      ingest: { condition: service_started }
+      ingest-proxy: { condition: service_started }
 
 volumes:
   clickhouse-data:

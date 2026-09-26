@@ -1,0 +1,17 @@
+# F38: the generator runs on another machine (built with `pnpm generator:exe`). Turn on in .env:
+#   COMPOSE_FILE=compose.yaml:compose.two-device.yaml
+#   GENERATOR_HOST=<that machine's LAN address>
+# No local generator runs. Web and Prometheus resolve the name `generator` to GENERATOR_HOST, so
+# /control, the dashboard and the generator:4002 scrape target work unchanged.
+services:
+  generator:
+    deploy:
+      replicas: 0
+
+  web:
+    extra_hosts:
+      - "generator:${GENERATOR_HOST:?set GENERATOR_HOST in .env to the generator machine's address}"
+
+  prometheus:
+    extra_hosts:
+      - "generator:${GENERATOR_HOST:?set GENERATOR_HOST in .env to the generator machine's address}"

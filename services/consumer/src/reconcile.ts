@@ -232,9 +232,24 @@ async function rewrite(tx: Tx, redis: Redis, contestId: string, truth: Truth) {
 
   const multi = redis
     .multi()
-    .del(redisKeys.totals(contestId), redisKeys.minutes(contestId))
+    .del(
+      redisKeys.totals(contestId),
+      redisKeys.minutes(contestId),
+      redisKeys.contestantMinutes(contestId),
+    )
     .hset(redisKeys.meta(contestId), 'totalVotes', truth.votes, 'lastUpdated', Date.now());
   if (truth.totals.size) multi.hset(redisKeys.totals(contestId), Object.fromEntries(truth.totals));
+  if (truth.buckets.size) {
+    multi.hset(
+      redisKeys.contestantMinutes(contestId),
+      Object.fromEntries(
+        [...truth.buckets].map(([k, count]) => {
+          const [contestantId, minute] = k.split('|');
+          return [`${minute}:${contestantId}`, count];
+        }),
+      ),
+    );
+  }
   if (truth.minutes.size) {
     multi.hset(redisKeys.minutes(contestId), Object.fromEntries(truth.minutes));
     multi.hset(redisKeys.meta(contestId), 'lastMinute', Math.max(...truth.minutes.keys()));

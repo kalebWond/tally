@@ -12,7 +12,7 @@ The build order, one feature (F-number) per session. What each feature decided a
 
 ---
 
-## Built (on `main`)
+## Built
 
 | F | Feature | What it delivered |
 |---|---|---|
@@ -49,18 +49,13 @@ The build order, one feature (F-number) per session. What each feature decided a
 | 31 | Lively UI | Spring presets, "+N", the overtake lift, LIVE beat, List ↔ Grid morph |
 | 32 | Stage look | The TV-show stage, searchlights cued by `lib/lighting.ts`, glass rows |
 | 34 | README and case study | The README, demo clip and stills (built before F33) |
+| 35 | Partition votes evenly | Keyed by idempotency key over `TOPIC_PARTITIONS` (default 24) |
+| 36 | Ingest replicas | `INGEST_REPLICAS` behind nginx (`ingest-proxy`) |
+| 37 | Scale out counting | `CONSUMER_REPLICAS`; sorted upserts; contest-wide figures summed in Redis |
+| 38 | Generator on a second device | Two-device mode (`compose.two-device.yaml`), the generator as a Windows program |
 | 39 | Podium and a true-result finale | Top three stand out; the finale waits for every queued vote to be counted |
 
-## Built on the branch `two-device` (not merged)
-
-| F | Feature | Result |
-|---|---|---|
-| 35 | Partition votes evenly | Keyed by idempotency key over `TOPIC_PARTITIONS` (24) |
-| 36 | Ingest replicas | `INGEST_REPLICAS` behind nginx |
-| 37 | Scale out counting | `CONSUMER_REPLICAS`, sorted upserts |
-| 38 | Generator on a second device | The generator as a Windows program on another machine |
-
-On the 4-core laptop the whole pipeline tops out near 4,700 votes/s however the replicas are split, and moving the generator off it gave no gain. Not merged because a code review found that, with several consumers, the board's contest-wide total and per-minute counts can stay too low, and that raising the partition count on a running stack can leave new partitions uncounted until the consumers restart. The branch has its own plan entries, decisions and load results.
+F35–F38 were built on a branch, `two-device`, then hardened after a code review and merged: one machine with replicas is the default way to run it, and two-device mode is off unless configured. On the 4-core laptop the whole pipeline tops out near 4,700 votes/s however the replicas are split.
 
 ---
 

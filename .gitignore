@@ -11,3 +11,6 @@ load-results/*.json
 load-results/*.csv
 # Rendered recap videos (F25): pnpm recap
 recaps/
+
+# Archives of built binaries (the generator .exe is copied by hand, never committed)
+tools/generator/*.zip

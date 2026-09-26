@@ -28,6 +28,7 @@ A real-time voting platform that ingests high-volume vote traffic, counts it thr
 | Queue | Redpanda (Kafka API) |
 | Stores | Postgres (truth), Redis (live totals), ClickHouse (analytics) |
 | Metrics | Every service serves `/metrics`; Prometheus and Grafana in compose |
+| Scaling | Ingest and consumer replicas in compose (`INGEST_REPLICAS`, `CONSUMER_REPLICAS`); the generator can run on a second machine |
 | Deployment | Docker Compose; a hosted deployment and Kubernetes are optional (`IMPLEMENTATION_PLAN.md`) |
 
 ---
@@ -58,13 +59,18 @@ The analytics consumer has its own consumer group: if it stalls, live results ar
 | Service | Stack | Port | Responsibility |
 |---|---|---|---|
 | `web` | Next.js | 3000 | Results boards, operator pages, the web API |
-| `ingest` | Fastify | 4000 | Validate, hash, publish votes |
+| `ingest-proxy` | nginx | 4000 | The one entry point for votes: spreads requests over the ingest replicas |
+| `ingest` | Fastify | 4000 (inside) | Validate, hash, publish votes; `INGEST_REPLICAS` copies |
 | `gateway` | Node | 4001 | Poll Redis, push totals over WebSocket |
 | `generator` | Go | 4002 | Synthetic vote load, HTTP control API |
-| `consumer` | Node | 4003 (`/health`, `/metrics`) | Count into Postgres and Redis, dead-letter the rest |
+| `consumer` | Node | 4003 inside (`/health`, `/metrics`) | Count into Postgres and Redis, dead-letter the rest; `CONSUMER_REPLICAS` copies share the partitions |
 | `analytics-consumer` | Node | 4004 (`/health`, `/metrics`) | Copy both topics into ClickHouse |
 
-Infrastructure: Redpanda (9092 in the compose network, 19092 from the host), Postgres 5432, Redis 6379, ClickHouse 8123, Prometheus 9090, Grafana 3001.
+Infrastructure: Redpanda (9092 in the compose network, 19092 from the host), Postgres 5432, Redis 6379, ClickHouse 8123, Prometheus 9090 (finds every replica through DNS), Grafana 3001.
+
+**Replicas** publish no host port, so compose can scale them. nginx re-reads the ingest replicas from Docker's DNS every 5 s and keeps connections to them open. Consumers split the partitions of one consumer group; when the partition count changes, compose restarts them so they're assigned the new ones.
+
+**Two-device mode:** with `COMPOSE_FILE=compose.yaml:compose.two-device.yaml` and `GENERATOR_HOST` set, no local generator runs, and web and Prometheus reach the one on that machine as `generator`. `pnpm generator:exe` builds it as a Windows program, which needs neither Docker nor Go there.
 
 ---
 
@@ -89,9 +95,10 @@ Postgres, via Drizzle (`packages/db`); migrations in `infra/migrations`.
 tally:{contestId}:totals    hash  contestantId → total
 tally:{contestId}:meta      hash  totalVotes, lastUpdated, lastMinute (consumer); status (web)
 tally:{contestId}:minutes   hash  minute (epoch ms) → the contest's votes that minute
+tally:{contestId}:contestant-minutes   hash  "<minute>:<contestantId>" → that contestant's votes that minute
 tally:backlog               hash  lag:<partition>, rate:<instance>, updatedAt; each field expires 10 s after writing
 ```
-The consumer writes absolute values read back from Postgres, and only ever upward (a Lua script), so a redelivered batch can't double-count and a missed write heals on the next one. `tally:backlog` is the consumers' own lag, rewritten every second.
+The consumer writes per-contestant values, read back from rows its own transaction has locked, so they're exact. A Lua script sets them only if higher, then sums the contest's `totalVotes` and each minute from them, atomically. Sums read in Postgres by concurrent consumers would miss each other's uncommitted votes. Because every value is absolute and only goes up, a redelivered batch can't double-count and a missed write heals on the next one. `tally:backlog` is the consumers' own lag, rewritten every second and summed across consumers by readers.
 
 **ClickHouse** (`services/analytics-consumer/src/schema.ts`, versioned migrations applied at startup): `votes_raw` and `votes_dead`, rows as delivered (at-least-once). Readers count votes as `uniqExact(key_hash)` (`key_hash = cityHash64(idempotency_key)`); counted = accepted − rejected. No rollup tables.
 
@@ -99,7 +106,7 @@ The consumer writes absolute values read back from Postgres, and only ever upwar
 
 ## 6. Events
 
-Both topics have 6 partitions, created by a one-shot `rpk` job (services never create topics). `votes.raw` is keyed by the contestant code (Java-compatible murmur2), so a contestant's votes stay in order on one partition.
+Both topics have `TOPIC_PARTITIONS` partitions (default 24), created, and raised when the setting grows, by a one-shot `rpk` job; services never create topics. Partitions can be added, never removed. Messages are keyed by the vote's idempotency key (Java-compatible murmur2), so votes spread evenly over the partitions whoever is winning, and a retry lands where the first try did. Nothing depends on per-contestant order: totals are sums, Redis only accepts higher values, and closing goes by acceptance time.
 
 ```json
 {
@@ -116,7 +123,7 @@ Both topics have 6 partitions, created by a one-shot `rpk` job (services never c
 
 `code` is trimmed and uppercased at ingest and must match `^[A-Z0-9]{1,16}$`; `sent_at` is when ingest accepted the vote.
 
-`votes.dead` carries `{ "v": 1, "reason", "failed_at", "idempotency_key", "original" }`, where `original` is the message as received (parsed JSON, or `{ "raw": "…" }`). A redelivered batch republishes its dead letters with the same key and `failed_at`. Keyed by the original code when there is one.
+`votes.dead` carries `{ "v": 1, "reason", "failed_at", "idempotency_key", "original" }`, where `original` is the message as received (parsed JSON, or `{ "raw": "…" }`). A redelivered batch republishes its dead letters with the same key and `failed_at`. Keyed by the dead letter's idempotency key.
 
 Schemas are Zod, once, in `packages/contracts`. The Go generator mirrors its structs; a contract test compares them with JSON Schemas exported from Zod.
 
@@ -185,7 +192,9 @@ GET    /api/analytics/:contestId           ClickHouse only
 | Durability | zero loss | met: every run reconciles |
 | Recovery | totals rebuildable from the log | `pnpm reconcile [--repair]`; Redis rebuilt at every consumer start |
 
-Performance targets apply to the data pipeline (ingest → queue → consumer → gateway), not to how the board renders at the generator's maximum rate. `pnpm load <smoke|steady|spike>` runs k6 inside the compose network and checks zero loss and reconciliation; reports in `load-results/`.
+Performance targets apply to the data pipeline (ingest → queue → consumer → gateway), not to how the board renders at the generator's maximum rate. `pnpm load <smoke|steady|spike>` runs k6 inside the compose network (through nginx) and checks zero loss and reconciliation; reports in `load-results/`.
+
+**Scaling on one laptop** (4 cores): the whole pipeline tops out near 4,700 votes/s however the replicas are split, since each added consumer takes CPU from intake. What more consumers buy on one machine is a board that keeps up: with 3, no backlog forms. The generator on a second machine over Wi-Fi was capped by its round trip (256 workers at 56–87 ms). Details are in `load-results/`.
 
 ---
 
@@ -200,7 +209,7 @@ Performance targets apply to the data pipeline (ingest → queue → consumer �
 - **Live details:** "+N" rising as votes land, a LIVE dot beating at the vote rate, votes per minute (Recharts), the counting backlog ("Counting N queued votes · about 8 s"), connection state with automatic reconnect (the last totals stay, dimmed).
 - **The stage:** the board sits on a drawn TV-show stage: an LED wall in the leader's colours, rig lamps, two searchlights and a crowd in silhouette. The lights follow the contest (`lib/lighting.ts`): dark before opening; swaying at a tempo set by the vote rate; crossing on a new leader; and, once voting has closed **and every queued vote is counted**, the finale: gold confetti (about 9 s, once, in the winner's colour) while the beams wander. A page loaded after that shows the finale without confetti. The queue is shared by all contests, so this assumes one contest votes at a time.
 - **The podium:** the first three places with votes stand out: taller list rows with gold, silver and bronze, and a row of their own in the grid (stacked on phones). Any number of contestants.
-- **At the close** the other rows step back; the "Final" badge replaces LIVE.
+- **At the close** the "Final" badge replaces LIVE; the rows keep their look.
 - **Reduced motion:** movement becomes fades or jumps; no confetti; the beams hold still.
 
 **Operator pages** (plain look, behind the password): `/control` (generator panel: rate, bursts, delivered vs asked, the backlog draining), `/admin/contests` (create, open, close, reopen, delete drafts), `/admin/contestants` (add, edit, deactivate; "Fill with sample contestants" with invented names), `/admin/dead-letters`, `/admin/analytics` (ClickHouse only), `/admin/recap/:contestId` (the recap video in the browser). Times show in the viewer's zone.

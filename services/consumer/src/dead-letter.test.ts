@@ -74,7 +74,7 @@ beforeAll(async () => {
     messages: [
       ...[...valid, unknownCode, unknownContest].map((e) => ({
         topic,
-        key: e.code,
+        key: e.idempotency_key,
         value: JSON.stringify(e),
       })),
       { topic, key: 'C1', value: malformed },
@@ -104,13 +104,16 @@ describe('dead letters (votes.raw → votes.dead + dead_letters)', () => {
     const dead = await readDeadTopic(3).finally(() => consumer.stop());
 
     const byKey = new Map(dead.map((d) => [d.event.idempotency_key, d]));
+    // Keyed by idempotency key, like votes.raw (F35); a malformed message's is its offset.
     expect(byKey.get(unknownCode.idempotency_key)).toMatchObject({
-      key: 'ZZ9',
+      key: unknownCode.idempotency_key,
       event: { reason: 'unknown_code', original: unknownCode },
     });
     expect(byKey.get(unknownContest.idempotency_key)?.event.reason).toBe('unknown_code');
     const bad = dead.find((d) => d.event.reason === 'malformed');
     expect(bad?.event.original).toEqual(JSON.parse(malformed));
+    expect(bad?.key).toBe(bad?.event.idempotency_key);
+    expect(bad?.key).toMatch(/^offset:/);
 
     // Mirrored in the table, and only the three valid votes were counted.
     const { rows } = await stores.db.execute<{ dead: number; total: number }>(sql`

@@ -52,7 +52,7 @@ sequenceDiagram
   participant B as Browser
   S->>I: POST /votes {contestId, code, sender}
   I->>I: validate, HMAC the sender
-  I->>Q: publish, keyed by contestant code
+  I->>Q: publish, keyed by idempotency key
   Q-->>I: acknowledged by all in-sync replicas
   I-->>S: 202 Accepted
   Q->>C: batch
@@ -65,7 +65,7 @@ sequenceDiagram
 
 | Service | Role |
 |---|---|
-| `services/ingest` | Fastify. Validate, hash the sender, publish, return `202`. Thin on purpose. |
+| `services/ingest` | Fastify. Validate, hash the sender, publish, return `202`. Thin on purpose, so it runs as several replicas behind nginx (`INGEST_REPLICAS`). |
 | `services/consumer` | Resolves codes, dedupes, and writes votes, totals and per-minute buckets to Postgres and absolute totals to Redis. Rebuilds Redis from Postgres at startup. |
 | `services/gateway` | WebSocket fan-out: a snapshot on connect, then diffs. One Redis poll per watched contest, however many viewers. |
 | `services/analytics-consumer` | Copies both topics into ClickHouse, rows as delivered. |
@@ -121,7 +121,7 @@ The full record, with the alternatives considered each time, is [`DECISIONS.md`]
 - **Postgres is the truth, Redis is speed.** Nothing lives in Redis that Postgres can't rebuild, and the consumer rebuilds it at every start. The cost is a start-up of minutes once the vote log holds millions of votes. The gain is that no failure can leave the live totals permanently wrong. (F5, F17)
 - **Duplicates are caught in one place.** Postgres's unique idempotency key is the only dedupe, and Redis only receives absolute totals, never increments. So at-least-once delivery counts each vote exactly once, and a replay can't drift the board. (F5)
 - **`202` means the broker has it.** The producer waits for all in-sync replicas (`acks=all`) and is idempotent; 5 ms micro-batches keep that cheap. A slower broker makes ingest slower, but a `202` is never a promise the queue can't keep. (F4)
-- **Keyed by contestant code** with Java-compatible murmur2, so partitions match Redpanda's own tools, and each contestant's votes stay in order. (F4)
+- **Keyed by idempotency key, over 24 partitions.** Votes spread evenly whoever is winning, so a popular contestant can't load a single partition, and a retry lands where the first try did. Keying by contestant code (F4) kept each contestant's votes in order, which nothing needed, and put four of the ten codes on one partition. Java-compatible murmur2, so placement matches Redpanda's own tools. (F4, F35)
 - **Dead letters are first-class.** Every rejection has a reason, lands in a Postgres table and a topic, and is browsable in the admin. (F5, F6, F15)
 - **The gateway sends absolute totals: a snapshot, then diffs.** A missed frame is healed by the next one, and a reconnect resyncs without a page refresh. It makes one Redis poll per watched contest, independent of audience size. (F7, F11)
 - **Closing is by acceptance time, under a lock.** A vote counts if ingest accepted it before the close, even if it's still queued. A lock handshake means no vote is half-counted at the cut-off. (F16)
@@ -146,6 +146,20 @@ pnpm check:health
 | http://localhost:3000/control | Generator panel and admin (password from `.env`) |
 | http://localhost:3001 | Grafana (anonymous viewer) |
 | http://localhost:9090 | Prometheus |
+
+**Scaling on one machine.** Everything runs in compose. Set the replica counts in `.env` (or in front of the command) and bring the stack up again:
+
+```sh
+INGEST_REPLICAS=2 CONSUMER_REPLICAS=3 docker compose --profile app up -d
+pnpm check:health                 # checks every ingest and consumer replica
+```
+
+- **Ingest replicas** sit behind nginx (`ingest-proxy`), which owns port 4000 and picks up new replicas within 5 s.
+- **Consumer replicas** split the queue's partitions (24 by default, `TOPIC_PARTITIONS`).
+- **Prometheus and Grafana** find every replica on their own.
+- **On a 4-core laptop** the whole pipeline tops out near 4,700 votes/s however the replicas are split. More consumers keep the board from falling behind (with 3, no backlog forms); more throughput needs more cores ([`load-results/`](load-results)).
+
+**Generator on a second machine:** run `pnpm generator:exe` and copy `tools/generator/bin/generator.exe` and `run-generator.cmd` to a Windows PC on the same network, where neither Docker nor Go is needed. Then set `COMPOSE_FILE=compose.yaml:compose.two-device.yaml` and `GENERATOR_HOST=<its address>` in `.env`, and run `docker compose --profile app up -d`. The generator panel drives the remote generator as before.
 
 Useful commands:
 

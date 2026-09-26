@@ -14,11 +14,11 @@ const ROOT = path.join(import.meta.dirname, '..');
 const PROFILE = process.argv[2] ?? 'smoke';
 const K6_IMAGE = 'grafana/k6:2.3.0';
 const CONTEST = process.env.CONTEST_ID ?? '0192f3a0-7c1e-7000-8000-00000000c0de';
-// k6 runs inside the compose network and calls ingest by service name: going through the
+// k6 runs inside the compose network and calls the ingest proxy (F36) by service name: going through the
 // host's published port adds docker-proxy, a userspace copy of every request, which at
 // 3,000 req/s costs CPU and latency that a real deployment wouldn't have.
 const NETWORK = process.env.COMPOSE_NETWORK ?? 'tally_default';
-const INGEST = process.env.INGEST_URL ?? 'http://ingest:4000';
+const INGEST = process.env.INGEST_URL ?? 'http://ingest-proxy:4000';
 const OUT = path.join(ROOT, 'load-results');
 
 if (!['smoke', 'steady', 'spike'].includes(PROFILE)) {
@@ -64,8 +64,21 @@ if (status !== 'open')
 const codes = psql(
   `select string_agg(code, ',' order by code) from contestants where contest_id = '${CONTEST}' and active`,
 );
+// F38: the generator may run on another machine (GENERATOR_HOST in the environment or .env).
+const genHost =
+  process.env.GENERATOR_HOST ??
+  (() => {
+    try {
+      return readFileSync(path.join(ROOT, '.env'), 'utf8')
+        .match(/^GENERATOR_HOST=(.+)$/m)?.[1]
+        .trim()
+        .replace(/^["']|["']$/g, '');
+    } catch {
+      return undefined;
+    }
+  })();
 try {
-  await fetch('http://localhost:4002/stop', { method: 'POST' }); // no generator traffic mixed in
+  await fetch(`http://${genHost || 'localhost'}:4002/stop`, { method: 'POST' }); // no generator traffic mixed in
 } catch {}
 const health = await fetch('http://localhost:4000/health').then(
   (r) => r.status,
