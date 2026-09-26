@@ -49,7 +49,8 @@ fi
 
 # A generator on another machine (F38, GENERATOR_HOST in .env) isn't a compose service here: stop
 # its run so it can't send votes into the wipe. The process stays up, idle.
-gen_host="${GENERATOR_HOST:-$(sed -n 's/^GENERATOR_HOST=//p' .env 2>/dev/null | tail -1)}"
+gen_host="${GENERATOR_HOST:-$( [ -f .env ] && sed -n 's/^GENERATOR_HOST=//p' .env | tail -1 || true)}"
+gen_host="${gen_host//[\"\']/}"
 if [ -n "$gen_host" ]; then
   curl -fsS -m 3 -X POST "http://$gen_host:4002/stop" >/dev/null 2>&1 &&
     echo "stopped the generator's run on $gen_host" ||
@@ -83,7 +84,7 @@ echo "truncate votes, vote_totals, vote_buckets, dead_letters restart identity" 
 echo "redis"
 docker compose exec -T redis redis-cli --raw eval "
   for _, k in ipairs(redis.call('KEYS', 'tally:*')) do
-    if k:match(':totals\$') or k:match(':minutes\$') then redis.call('DEL', k)
+    if k:match(':totals\$') or k:match(':minutes\$') or k:match(':contestant%-minutes\$') then redis.call('DEL', k)
     elseif k:match(':meta\$') then redis.call('HDEL', k, 'totalVotes', 'lastMinute', 'lastUpdated') end
   end
   return 1" 0 >/dev/null

@@ -43,6 +43,16 @@ export async function createTestStores() {
       await redis.flushdb();
       redis.disconnect();
       await conn.close();
+      // pool.end() resolves before its connections have gone; dropping "with (force)" then kills
+      // them mid-close, and the pool reports 57P01 as an uncaught error that fails the run.
+      for (let i = 0; i < 40; i++) {
+        const { rows } = await admin.query<{ n: number }>(
+          'select count(*)::int as n from pg_stat_activity where datname = $1',
+          [name],
+        );
+        if (rows[0]?.n === 0) break;
+        await new Promise((r) => setTimeout(r, 50));
+      }
       await admin.query(`drop database if exists ${name} with (force)`);
       await admin.end();
     },

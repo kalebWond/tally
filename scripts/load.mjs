@@ -71,7 +71,8 @@ const genHost =
     try {
       return readFileSync(path.join(ROOT, '.env'), 'utf8')
         .match(/^GENERATOR_HOST=(.+)$/m)?.[1]
-        .trim();
+        .trim()
+        .replace(/^["']|["']$/g, '');
     } catch {
       return undefined;
     }

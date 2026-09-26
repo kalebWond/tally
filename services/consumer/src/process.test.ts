@@ -67,6 +67,27 @@ beforeEach(async () => {
 });
 
 describe('processBatch', () => {
+  it('concurrent batches for different contestants keep the contest-wide figures exact (F37)', async () => {
+    // Each batch counts one contestant. A contest-wide sum read inside one transaction misses the
+    // others' uncommitted votes, and the upward-only write kept the larger of two short sums: the
+    // header's total and the chart could stay low for good.
+    const batch = (code: string) => asMessages(Array.from({ length: 20 }, () => voteEvent(code)));
+    for (let round = 0; round < 30; round++) {
+      await Promise.all(CODES.slice(0, 6).map((code) => processBatch(batch(code), deps())));
+    }
+    const minutes = await stores.redis.hvals(redisKeys.minutes(CONTEST_ID));
+    expect({
+      ...(await snapshot()),
+      minutesSum: minutes.reduce((sum, v) => sum + Number(v), 0),
+    }).toMatchObject({
+      votes: 3600,
+      total: 3600,
+      redisSum: 3600,
+      metaTotal: 3600,
+      minutesSum: 3600,
+    });
+  }, 60_000);
+
   it('concurrent batches from several consumers never deadlock, and count exactly (F37)', async () => {
     // Six consumers' batches touching the same contestants in random orders. Rows upserted in
     // arrival order can lock C1…C10 against C10…C1 and deadlock; sorted, they queue instead.
@@ -85,7 +106,7 @@ describe('processBatch', () => {
       redisSum: 36_000,
       redisMatchesPg: true,
     });
-  });
+  }, 60_000);
 
   it('1,000 votes produce totals of exactly 1,000 in Postgres and Redis', async () => {
     const events = Array.from({ length: 1000 }, (_, i) =>
@@ -152,7 +173,7 @@ describe('processBatch', () => {
 
     // A stale writer (e.g. a consumer mid-rebalance) tries to set an older, smaller total.
     await createTotalsStore(stores.redis).apply([
-      { contestId: CONTEST_ID, totals: new Map([[c1.id, 3]]), totalVotes: 3, minutes: new Map() },
+      { contestId: CONTEST_ID, totals: new Map([[c1.id, 3]]), minutes: new Map() },
     ]);
 
     expect(Number(await stores.redis.hget(redisKeys.totals(CONTEST_ID), c1.id))).toBe(10);

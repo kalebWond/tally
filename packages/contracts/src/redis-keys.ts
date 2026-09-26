@@ -13,6 +13,13 @@ export const redisKeys = {
   /** Hash: minute start (epoch ms) → the contest's votes in that minute (F17). */
   minutes: (contestId: string) => `tally:${contestId}:minutes`,
   /**
+   * Hash: `<minute>:<contestantId>` → that contestant's votes in that minute. The consumer writes
+   * these exact per-contestant values; `minutes` and `meta.totalVotes` are summed from them in
+   * Redis, because contest-wide sums read in Postgres by concurrent consumers miss each other's
+   * uncommitted votes (F37).
+   */
+  contestantMinutes: (contestId: string) => `tally:${contestId}:contestant-minutes`,
+  /**
    * Hash (F29), system-wide: `lag:<partition>` → votes on votes.raw not yet counted, written by
    * the consumer that owns the partition; `rate:<instance>` → votes/s each consumer is counting;
    * `updatedAt` (epoch ms). Every field expires 10 s after it's written, so a stopped consumer's

@@ -4,7 +4,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 # F38: the generator may run on another machine (GENERATOR_HOST in the environment or .env).
-gen_host="${GENERATOR_HOST:-$(sed -n 's/^GENERATOR_HOST=//p' .env 2>/dev/null | tail -1)}"
+gen_host="${GENERATOR_HOST:-$( [ -f .env ] && sed -n 's/^GENERATOR_HOST=//p' .env | tail -1 || true)}"
+gen_host="${gen_host//[\"\']/}"
 
 TIMEOUT="${TIMEOUT:-90}"
 fail=0
@@ -33,16 +34,20 @@ for target in web:3000 ingest:4000 gateway:4001 analytics-consumer:4004; do
 done
 wait_for "generator /health${gen_host:+ (on $gen_host)}" "curl -fsS http://${gen_host:-localhost}:4002/health"
 
-# Consumers publish no host port in containers (F37: they scale), so each replica is checked from
-# inside; on the host (pnpm dev) there is one, on localhost:4003.
-replicas=$(docker compose ps -q consumer 2>/dev/null | wc -l)
-if ((replicas == 0)); then
-  wait_for "consumer /health" "curl -fsS http://localhost:4003/health"
-else
+# Ingest and consumer replicas publish no host port in containers (F36, F37: they scale), so each
+# is checked from inside; on the host (pnpm dev) there is one of each, on its own port. Ingest's
+# port 4000 above is nginx, which reaches only one replica per request.
+for svc in ingest:4000 consumer:4003; do
+  name="${svc%%:*}" port="${svc##*:}"
+  replicas=$(docker compose ps -q "$name" 2>/dev/null | wc -l)
+  if ((replicas == 0)); then
+    [ "$name" = consumer ] && wait_for "consumer /health" "curl -fsS http://localhost:$port/health"
+    continue
+  fi
   for i in $(seq 1 "$replicas"); do
-    wait_for "consumer $i /health" \
-      "docker compose exec -T --index $i consumer node -e \"fetch('http://localhost:4003/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))\""
+    wait_for "$name $i /health" \
+      "docker compose exec -T --index $i $name node -e \"fetch('http://localhost:$port/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))\""
   done
-fi
+done
 
 exit "$fail"

@@ -1199,3 +1199,24 @@ Headless Chrome against the `app` stack, on four test contests ("F39 Check 3/7/1
 **Why it fits the replicas:** the finale waits for "counted", meaning the backlog is empty. The backlog is summed across every consumer's partitions (F29 was built for several consumers), so with 2 or 3 consumers the finale still waits until every queued vote is counted.
 **The known risk carries over:** the code review's medium finding still stands. With several consumers, the contest-wide `totalVotes` and per-minute counts in Redis can stay too low. The podium and the per-contestant totals are unaffected, but the header's "votes cast" can end below the sum of the rows. The branch test checks for it.
 
+## F37 — Hardening the replicas before merging into `main`
+The code review's findings on F35–F37, fixed at the user's request before the branch merges into `main`, where it runs on one machine with replicas.
+- **The contest-wide total and per-minute counts could stay too low with several consumers.**
+  - **Cause:** each batch read `sum(vote_totals)` and per-minute sums for the whole contest inside its own transaction. Two consumers counting different contestants each missed the other's uncommitted votes, and the upward-only write kept the larger of two short sums.
+  - **Fix:** the consumer now writes only per-contestant values, which it reads back from rows its own transaction has locked, so they're exact. One Lua script sums the contest's `totalVotes` and each minute from them, atomically in Redis. Per-contestant minutes live in a new derived key, `tally:{id}:contestant-minutes`, rebuilt at consumer start and by reconcile's repair. The gateway and the board are unchanged.
+  - **The check first:** a test running six concurrent single-contestant batches over 30 rounds failed twice before the fix (header 3,500 and 3,560 of 3,600) and passed five times out of five after.
+  - **Alternatives:**
+    - Taking share locks on the contest's rows: that deadlocks, since each transaction already holds its own rows.
+    - Having the gateway sum the totals hash: that leaves the per-minute chart wrong.
+- **New partitions went uncounted until a consumer restart.** `consumer` and `analytics-consumer` now depend on `topics` with `restart: true`. When `TOPIC_PARTITIONS` changes, compose re-creates the job and restarts both consumers, so they rejoin and are assigned the new partitions. A dry run confirmed it, and an unchanged `up` leaves them running.
+- **Smaller fixes:**
+  - vote and dead-letter inserts sorted by idempotency key, since after a rebalance two owners could briefly hold the same keys
+  - the deadlock test given a 60 s timeout
+  - test teardown waits for the pool's connections to close before dropping the test database, because `pnpm test` exited 1 on a 57P01 in about a quarter of runs; six runs after the fix were all clean
+  - `check-health.sh` checks every ingest replica from inside
+  - the topics job refuses partition counts from `rpk` it can't parse
+  - the scripts survive a missing `.env` and a quoted `GENERATOR_HOST`
+- **At the user's request:**
+  - no dimming at the close: the rows keep their opacity
+  - `.env.example` lists the replica counts, and the two-device lines commented out
+
