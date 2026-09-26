@@ -17,7 +17,7 @@ It's modelled on a production SMS voting system built for a live televised talen
   - A vote that can't be resolved goes to a dead-letter topic with a reason; none is dropped silently.
   - `pnpm reconcile` proves every derived count against the vote log.
 - **Measured, not claimed.** On a laptop running the whole stack: 1,000 votes/s sustained and 3,000 votes/s bursts at p95 7–20 ms, with every accepted vote counted exactly once ([numbers below](#performance)).
-- **A board built for the overtake.** Counters retarget a spring instead of restarting, so four updates a second read as one continuous climb. Rows glide past each other when one overtakes another, and the searchlights follow the lead.
+- **A board built for the overtake.** Counters retarget a spring instead of restarting, so four updates a second read as one continuous climb. Rows glide past each other when one overtakes another, the top three stand on a podium, and the searchlights follow the lead. After the close, the finale waits until every queued vote is counted, so the confetti falls for the true winner.
 
 ## Architecture
 
@@ -128,6 +128,7 @@ The full record, with the alternatives considered each time, is [`DECISIONS.md`]
 - **Analytics is a separate workload.** ClickHouse reads the same topics under its own consumer group; stopping it leaves live results untouched, and it catches up. It uses exact distinct counts and no rollups: rollups stored every key again and were slower than scanning. (F20, F21)
 - **Counters retarget, they don't restart.** Each new total is a new target for the same spring. The spring is overdamped, so a count never overshoots or runs backwards. (F9)
 - **One component, two layouts.** The card grid is the list row with a flag; switching never remounts anything, so the live feed and animations carry straight on. (F24)
+- **The finale waits for the true result.** Votes accepted before the close can still be in the queue and change the winner, so the confetti waits for the backlog to empty. (F39)
 - **Deployable by configuration.** Every service reads config from the environment and keeps no local state, and each has `/health` and graceful SIGTERM. That's what makes deployment, and the optional Kubernetes phase, additive rather than a rewrite.
 
 ## Run it

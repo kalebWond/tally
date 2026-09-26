@@ -2,149 +2,122 @@
 
 Project instructions for Claude Code. Read this before touching anything.
 
----
-
 ## What this is
 
-**Tally** — a real-time voting platform. Votes arrive over HTTP, flow through a Kafka-compatible queue, get aggregated by a consumer, and appear on a live results screen with animated counters.
+**Tally**: a real-time voting platform. Votes arrive over HTTP, flow through a Kafka-compatible queue, are counted by a consumer, and appear on a live results board with animated counters. A portfolio project modelled on a production SMS voting system for a live televised contest; a controllable Go load generator stands in for the telecom feed.
 
-It's a portfolio project modelled on a production SMS voting system built for a live televised contest. The telecom feed is replaced by a controllable Go load generator.
-
-Full detail lives in `SPEC.md`. Build order lives in `IMPLEMENTATION_PLAN.md`. Don't restate them here — read them.
-
----
+- `SPEC.md`: the system as it is (services, data, events, APIs, frontend).
+- `IMPLEMENTATION_PLAN.md`: the features (F-numbers), built and still to build.
+- `DECISIONS.md`: why, per feature. Long: use its index or `grep -n "^## F16" DECISIONS.md`; don't read it whole.
 
 ## Working agreement
 
-**One feature per session.** Find the current feature in `IMPLEMENTATION_PLAN.md`, build it, satisfy its "done when" check, stop. Don't start the next feature because there's time left.
-
-**Write the check first.** Every feature has a done-when condition. Make it verifiable before writing the implementation.
-
-**Ask, don't assume.** If the spec doesn't cover something — a field name, an error shape, a library choice — ask. Guessing creates work to undo later.
-
-**Log decisions.** Anything non-obvious goes in `DECISIONS.md` as a short entry: what was decided, what the alternatives were, why. This file becomes the case study and interview prep, so it matters.
-
-**Performance means the data pipeline.** The Go generator is a mock of the real vote sources. Performance targets apply to the pipeline (ingest → queue → consumer → gateway), not to how the frontend renders at the generator's maximum rate. Don't benchmark or tune the board against that rate.
-
-**Commit per feature.** Message format: `F7: realtime gateway`, plus a what/why bullet body, no Co-Authored-By trailer (the `/feature-commit` format). Since F18, Claude commits at the end of each feature and takes its recommended option on design questions, logging each in `DECISIONS.md`.
-
----
+- **One feature per session.** Build the current feature, satisfy its "done when" check, stop.
+- **Document first.** A new feature goes into `IMPLEMENTATION_PLAN.md` before it's built, and is built on the user's go-ahead.
+- **Write the check first.** Make the done-when verifiable before writing the implementation.
+- **Take the recommended option and log it.** On design questions, choose, and record anything non-obvious in `DECISIONS.md` (what, the alternatives, why). Ask about anything the spec doesn't cover that would be costly to undo, and always before anything outward-facing or irreversible (deploying, publishing, pushing, deleting data the user made).
+- **Commit per feature**, yourself: `F<n>: subject` plus a what/why bullet body, no Co-Authored-By trailer (`/feature-commit`). Don't push.
+- **Performance means the data pipeline.** The generator is a mock of the real vote sources; targets apply to ingest → queue → consumer → gateway, not to how the board renders at the generator's maximum rate. When a check fails for environmental reasons (a loaded laptop, headless rendering), report it with the measurement and ask; don't loop on variants.
+- **Leave no test data.** Checks that vote in Tally Showcase, or create test contests, delete what they added afterwards (Postgres, Redis and ClickHouse). Never touch the user's own contests.
 
 ## Stack
 
-TypeScript everywhere except the load generator, which is Go.
-
-- Frontend: Next.js, Tailwind, shadcn/ui, Motion, Recharts (react-countup dropped in F9: its updates restart the animation)
-- Backend: Fastify (ingest), plain Node services (consumer, gateway)
-- Queue: Redpanda, Kafka API
-- Data: PostgreSQL with Drizzle, Redis, ClickHouse (later phase)
-- Generator: Go
-- Local: Docker Compose
-- Tests: Vitest
-
----
+TypeScript everywhere except the Go load generator. Next.js, Tailwind, shadcn/ui, Motion, Recharts (web); Fastify (ingest); plain Node (consumer, gateway, analytics consumer); Redpanda; Postgres with Drizzle; Redis; ClickHouse; Prometheus and Grafana; Docker Compose; Vitest; Biome.
 
 ## Running locally
 
-- `docker compose up -d` starts infrastructure only (Redpanda, Postgres, Redis, ClickHouse on 8123, user/db `tally`). Run services on the host with `pnpm dev` (TS) and `go run .` in `tools/generator`. Host services read `.env` (copy from `.env.example`).
-- `docker compose --profile app up -d --build` runs the full stack in containers. Use it for demos, recordings, and checking the Dockerfiles.
-- Redpanda: containers use `redpanda:9092`, the host uses `localhost:19092`. A one-shot `topics` job creates `votes.raw` and `votes.dead` (6 partitions each) on every `docker compose up`. Inspect with `docker compose exec redpanda rpk topic consume votes.raw -o start`.
-- `pnpm db:migrate` / `pnpm db:seed` on the host (both idempotent). After a schema change, run `pnpm db:generate` and commit the SQL in `infra/migrations`. The `app` profile runs a one-shot `migrate` job (migrate + seed) before consumer and web.
-- `packages/*` import each other with `.ts` extensions (Turbopack can't map `.js` → `.ts`); services use `.js`. A bundled workspace package's runtime deps must also be the app's deps.
-- Go (generator): `pnpm test:go` / `scripts/go.sh <go args>` use host Go if installed, otherwise the `golang:1.27-alpine` image. After changing a contract the generator speaks, run `pnpm --filter @tally/contracts export-schemas`.
-- `pnpm lint` (Biome), `pnpm typecheck`, `pnpm test` (Vitest), `pnpm check:health`.
-- Analytics: `analytics-consumer` (port 4004, group `tally-analytics`) copies votes.raw and votes.dead into ClickHouse `votes_raw` / `votes_dead`, creating the tables at startup. Rows are as delivered: count votes as `uniqExact(key_hash)`; counted = accepted − rejected (`votes_dead.sent_at` is the vote's minute). Schema changes are new entries in `MIGRATIONS` (`src/schema.ts`), never edits to applied ones. `pnpm bench:clickhouse` benchmarks the per-minute queries. Query it: `curl 'http://localhost:8123/?user=tally&password=tally&database=tally' --data-binary 'SELECT …'`.
-- Metrics: every service serves `GET /metrics` (`@tally/metrics`; the Go generator writes the text format by hand). Prometheus :9090 and Grafana :3001 (anonymous viewer) run in the `app` profile. The dashboard is generated: edit `scripts/grafana-dashboard.py`, run it, commit the JSON. Consumer lag comes from Redpanda's metrics, not the consumers.
-- `pnpm recap [contestId] [--out file.mp4]` renders a contest's recap video (Remotion, `tools/recap`) into `recaps/`; default is the most recently closed contest. `pnpm contests` lists every contest with its ID, status and votes. The composition, its data type and the Postgres exporter live in `packages/recap-video` (entry points: `.` browser-safe, `/data` the props schema, `/export` the exporter), shared with `/admin/recap/[contestId]`, which plays it with `@remotion/player`. `tools/recap` and `packages/recap-video` pin zod 4.5.4 for Remotion; keep every `remotion`/`@remotion/*` package on one version.
-- `pnpm load <smoke|steady|spike>` runs k6 (in a container, in the compose network) against the running `app` stack, then checks zero loss and reconciliation; the report lands in `load-results/`. It stops the Go generator first.
-- `pnpm reset:votes [--yes]` wipes every vote and everything derived from votes (Postgres, Redis, ClickHouse, the topics and both consumer groups), keeping contests and contestants. It stops and restarts the compose services that touch votes, and refuses to run while services run on the host.
-- `pnpm reconcile [--repair] [--contest <uuid>] [--json]` recounts from `votes` and checks every derived count (Postgres and Redis); in containers, `docker compose run --rm reconcile …`. It pauses each contest's counting briefly while it runs.
-- Every new service gets its own Dockerfile and a compose entry under the `app` profile when it's created.
+| Command | Does |
+|---|---|
+| `docker compose --profile app up -d --build` | Full stack in containers (demos, checks, Dockerfiles) |
+| `docker compose up -d` | Infrastructure only; then `pnpm dev` and `go run .` in `tools/generator` on the host (reads `.env`) |
+| `pnpm check:health` | Every service's `/health` |
+| `pnpm lint`, `pnpm typecheck`, `pnpm test` | Biome, TypeScript, Vitest (the Kafka and DB tests need the infrastructure up) |
+| `pnpm test:go`, `scripts/go.sh <args>` | Go, in a `golang` container when Go isn't installed (it isn't here) |
+| `pnpm db:generate`, `db:migrate`, `db:seed` | After a schema change, generate and commit the SQL in `infra/migrations` |
+| `pnpm contests` | Every contest with its ID, status and votes |
+| `pnpm reconcile [--repair] [--contest <id>]` | Recount every derived total from the vote log |
+| `pnpm reset:votes [--yes]` | Wipe all vote data, keep contests; wipes the user's contests too, so ask first |
+| `pnpm load <smoke\|steady\|spike>` | k6 in the compose network, then zero-loss and reconciliation checks; report in `load-results/` |
+| `pnpm recap [contestId]` | Render a contest's recap video into `recaps/` |
+| `pnpm bench:clickhouse` | Benchmark the analytics queries |
 
----
+- **Addresses:** containers reach Redpanda at `redpanda:9092`, the host at `localhost:19092`. A one-shot `topics` job creates `votes.raw` and `votes.dead` (6 partitions) on every `docker compose up`. ClickHouse: `curl 'http://localhost:8123/?user=tally&password=tally&database=tally' --data-binary 'SELECT …'`.
+- **Imports:** `packages/*` import each other with `.ts` extensions (Turbopack can't map `.js` → `.ts`); services use `.js`. A bundled workspace package's runtime deps must also be the app's deps.
+- **Contracts:** after changing one the generator speaks, run `pnpm --filter @tally/contracts export-schemas`.
+- **Grafana:** the dashboard is generated: edit `scripts/grafana-dashboard.py`, run it, commit the JSON. Prometheus reads its config only at startup; restart it after editing.
+- **ClickHouse schema:** changes are new entries in `MIGRATIONS` (`services/analytics-consumer/src/schema.ts`), never edits to applied ones.
+- **Remotion:** keep every `remotion` / `@remotion/*` package on one version; `tools/recap` and `packages/recap-video` pin zod 4.5.4 for it.
+- **New services:** every new service gets a Dockerfile and a compose entry under the `app` profile.
 
 ## Layout
 
 ```
-apps/web                    Next.js — results, admin, generator control
-services/ingest             Fastify — validate and publish
-services/consumer           aggregate into Postgres + Redis
+apps/web                    Next.js: results boards, operator pages, web API
+services/ingest             Fastify: validate and publish
+services/consumer           count into Postgres and Redis
 services/gateway            WebSocket fan-out
-services/analytics-consumer ClickHouse writer (later)
+services/analytics-consumer ClickHouse writer
 tools/generator             Go load generator
-packages/contracts          Zod schemas and shared types
+tools/recap, tools/load     recap renderer (CLI), k6 profiles
+packages/contracts          Zod schemas, shared types, Redis key builders
 packages/db                 Drizzle schema, client, migrate and seed
-packages/recap-video        recap video component and exporter (web + tools/recap)
-infra/                      migrations (generated by drizzle-kit), k8s (optional, later)
+packages/recap-video        recap composition and exporter (web + tools/recap)
+infra/                      migrations, ClickHouse, Prometheus and Grafana config
 ```
-
----
 
 ## Rules that aren't negotiable
 
-**The ingest path stays thin.** Validate, hash, publish, return 202. No database reads or writes in the request path. Adding a query here defeats the architecture.
-
-**Never store raw sender identifiers.** Hash with the salt from the environment, immediately, before anything is persisted or logged.
-
-**Never drop a vote silently.** Anything that can't be resolved goes to `votes.dead` with a reason. No swallowed errors.
-
-**Consumers must be idempotent.** The queue delivers at least once. The same message arriving twice must not change any total.
-
-**Config comes from the environment.** No config files, no hardcoded hosts, no state on local disk. This is what makes the optional Kubernetes phase additive rather than a rewrite. Don't break it.
-
-**Every service needs `/health` and graceful SIGTERM shutdown.** Same reason.
-
-**Schemas live in `packages/contracts`.** Defined once with Zod, imported everywhere. Don't redefine an event shape inside a service. The Go generator mirrors these structs and has a contract test.
-
-**Postgres is truth, Redis is speed.** Redis must always be rebuildable from the Postgres vote log. Don't put anything in Redis that exists nowhere else.
-
----
+- **The ingest path stays thin.** Validate, hash, publish, return 202. No database reads or writes in the request path.
+- **Never store raw sender identifiers.** Hash with the salt from the environment before anything is persisted or logged.
+- **Never drop a vote silently.** Anything that can't be counted goes to `votes.dead` with a reason. No swallowed errors.
+- **Consumers are idempotent.** Delivery is at least once; the same message twice must not change any total.
+- **Config comes from the environment.** No config files for services, no hardcoded hosts, no local disk state.
+- **Every service has `/health` and graceful SIGTERM shutdown.**
+- **Schemas live in `packages/contracts`**, defined once with Zod. The Go generator mirrors them under a contract test.
+- **Postgres is truth, Redis is speed.** Redis must be rebuildable from Postgres; nothing lives only in Redis.
+- **No photographs of real public figures** in seed data or demos: generated or illustrated avatars only.
 
 ## Frontend specifics
 
-**Counter animations retarget, they don't restart.** Updates arrive faster than animations finish. Each new total is a new target the running animation springs toward. Starting a fresh animation per update causes visible stutter. This is the single most common way to get the UI wrong.
-
-**Reordering is animated by the layout system**, not by re-rendering the list. Rows should glide past each other on an overtake — that's the moment the whole project is built around.
-
-**One component, two layouts.** The card grid arriving in a later phase must reuse the list's component and data path with a layout flag. Don't fork them.
-
-**Next.js pitfalls met so far.** A server component must never import a value from a `'use client'` module (it gets a client reference, not the value; shared constants go in `lib/`). Update the URL with `window.history.replaceState(null, '', url)`: passing `window.history.state` stops the router syncing, and the next refresh restores the old URL. Operator times go through `<Time>` / `<ClockTime>` (`components/time.tsx`), never raw ISO or UTC strings.
-
-**Motion (F31) follows `.claude/skills/apple-design`.** Springs come from `lib/motion.ts` (`SNAPPY`, `SMOOTH`, `GENTLE`, `EXIT`; CSS uses `--ease-spring` with `--dur-snappy` / `--dur-smooth`). No ad-hoc timings. Motion comes from data or the operator's hand, never decoration, and only `transform` and `opacity` move on the board.
+- **Counters retarget, they don't restart.** Each new total is a new target for the running spring. A fresh animation per update stutters: the most common way to get the UI wrong.
+- **Reordering is the layout system's job**, not re-rendering. Rows glide past each other on an overtake: the moment the project is built around.
+- **One component, two layouts.** The card grid is the list row with a layout flag. Never fork them.
+- **Motion follows `.claude/skills/apple-design`.** Springs come from `lib/motion.ts` (`SNAPPY`, `SMOOTH`, `GENTLE`, `EXIT`, `APPEAR`; CSS: `--ease-spring`, `--dur-snappy`, `--dur-smooth`). No ad-hoc timings. Motion comes from data or the operator's hand, never decoration, and **only `transform` and `opacity` move on the board**.
 - **Reduced motion:** `MotionPreferences` (root layout) sets it app-wide. It jumps transforms rather than skipping them, so a decorative scale checks `useReducedMotion()` itself.
-- **Rows that leave:** wrap them in `LayoutGroup` so the rows below glide, and use `PresenceRow` so a row is inert while it fades.
-- **Rows' parts:** a row's parts (rank, stripe, avatar, name, score) use the row's `place` (arrangement plus index) as their `layoutDependency`. If they measure less often than the row, Motion places them relative to the row from where they used to be, and they can stay a slot away from their panel (F32).
-- **The stage (F32):** the results page sits on a painted stage (`components/stage`), cued by `lib/lighting.ts`. It is painted once; only the beams' angles, the walls' opacity and the house-light dim change, on the compositor. Operator pages stay plain. The finale (F39) waits for the counting backlog to empty after the close, since only then is the winner known; the backlog is system-wide, so this assumes one contest votes at a time.
-- **The podium (F39):** the first three places with votes are bigger; their text grows by `transform: scale`, never `font-size`, so a row stepping on or off resizes smoothly. Nothing assumes ten contestants.
-- **Per-frame work:** the board re-renders four times a second. Memoise what doesn't change. Prefer CSS transitions or Web Animations to JavaScript springs for anything that doesn't need retargeting with velocity. Never call `toLocaleString` with options per frame: it builds a formatter each call, so cache one.
+- **Rows' parts** (rank, stripe, avatar, name, score) use the row's `place` (arrangement, index, podium) as their `layoutDependency`. If they measure less often than the row, they can stay a slot away from their panel.
+- **Rows that leave** go in a `LayoutGroup` so the rows below glide, and use `PresenceRow` so they're inert while fading.
+- **The stage** (`components/stage`, cued by `lib/lighting.ts`) is painted once; only the beams' angles, the walls' opacity and the house-light dim change. The finale waits for the counting backlog to empty after the close, and the backlog is shared by all contests, so this assumes one contest votes at a time.
+- **The podium** (the first three places with votes) grows its text with `transform: scale`, never `font-size`, so rows resize smoothly. Nothing assumes a number of contestants.
+- **Per-frame work:** the board re-renders four times a second. Memoise what doesn't change; prefer CSS transitions or Web Animations to JavaScript springs where no velocity is needed; never call `toLocaleString` with options per frame (cache a formatter).
+- **Next.js pitfalls:**
+  - A server component must never import a value from a `'use client'` module; shared constants go in `lib/`.
+  - Update the URL with `window.history.replaceState(null, '', url)`.
+  - Operator times go through `<Time>` / `<ClockTime>`, never raw ISO strings.
+- **Operator pages** live in the `app/(operator)` route group (nav and local-time provider) and keep a plain look. Web talks to Redis for one thing: the contest status in the meta hash.
 
-**No photographs of real public figures** in seed data or demos. Generated or illustrated avatars only — likeness and IP issues on a public portfolio piece.
+## Testing and done
 
----
-
-## Testing
-
-Test the logic that would be embarrassing to get wrong: idempotency, code resolution, dead-letter routing, counter aggregation, the snapshot-delta protocol.
-
-Don't write tests that assert framework behaviour or restate the implementation.
-
----
-
-## Definition of done
-
-A feature is done when its check in `IMPLEMENTATION_PLAN.md` passes, tests cover the core logic, `docker compose --profile app up` still brings the whole stack up cleanly (and `scripts/check-health.sh` passes), nothing from the rules above was violated, and `DECISIONS.md` has an entry if anything non-obvious was chosen.
-
----
+- **Test the logic that would be embarrassing to get wrong:** idempotency, code resolution, dead-letter routing, counting, the snapshot-then-diff protocol, the lighting cues. Don't test framework behaviour or restate the implementation.
+- **A feature is done when:**
+  - its check passes
+  - tests cover its core logic
+  - `docker compose --profile app up` brings the stack up and `pnpm check:health` passes
+  - no rule above was broken
+  - `DECISIONS.md` has an entry for anything non-obvious
+- **Headless Chrome checks** (`google-chrome --headless=new` over CDP):
+  - kill Chrome's whole process group afterwards
+  - give each browser a fresh profile
+  - wait for hydration before clicking
+  - sign in once to warm the server first (the first sign-in after a boot logs React's "Connection closed", #412)
 
 ## Current state
 
 Update this section as you go.
 
-**Last completed:** F39, podium and a finale on the true result (2026-09-26), with the code-review fixes for F31–F32 before it. F34, README and case study, and F32, stage look, before that.
-**Next up:** a clean-up of the docs and this file, at the user's request. F33 (deployment) and F40–F42 (Kubernetes) are optional. F35–F38 (partition key, ingest and consumer replicas, generator on a second device) live on the branch `two-device`, not merged; a review found a bug there with several consumers (see `IMPLEMENTATION_PLAN.md`). Outstanding: the k6 spike regression (DECISIONS, F23); more than one ingest replica is the obvious next step there.
-
-**Seed contest:** `0192f3a0-7c1e-7000-8000-00000000c0de` ("Tally Showcase"), codes `C1`–`C10`, closed and without votes. Checks and demos that vote in it wipe its votes afterwards (Postgres, Redis and ClickHouse, filtered to the contest), so no test data is left behind. The README's media (`docs/media`) was recorded from it.
-
-**Operator pages** (in the `app/(operator)` route group, whose layout renders the nav and the local-time provider): `/control` (generator panel), `/admin/contests` (create a draft, open/close/reopen, delete drafts; opening needs an active contestant; names unique ignoring case), `/admin/contestants` (with "Fill with sample contestants": invented names, reviewed before saving), `/admin/dead-letters`, `/admin/analytics` (ClickHouse only) and `/admin/recap/[contestId]` (the recap video, played in the browser), behind `ADMIN_PASSWORD` from `.env`. Contestant codes are fixed once created; deactivate instead of deleting. Checks that close the seed contest must reopen it. Web now talks to Redis for one thing: the contest status in the meta hash. The consumer rebuilds Redis totals and minutes from Postgres every time it starts. The consumer also writes `tally:backlog` every second (its lag per partition and its rate, each field expiring after 10 s); the gateway's frames and `/control` show it, system-wide, not per contest.
-
-**Known gaps:** Go isn't installed on the dev machine; `scripts/go.sh` runs it in a container. k6 at 3,000/s misses p95 < 50 ms on the full stack (70–107 ms; F23). Check scripts that drive headless Chrome must kill its whole process group, or renderers linger. Give each browser a fresh profile (a reused one carries old sessions), wait for hydration before clicking, and warm the web server with one sign-in first: the first sign-in after it boots logs React's "Connection closed" (#412). With millions of votes, every consumer start rebuilds Redis from the whole vote log for minutes; measure frame times before restarting it.
+- **Branches:** `main` runs everything on one machine. The branch `two-device` (F35–F38: partition key, ingest and consumer replicas, a generator on a second device) isn't merged: a review found a bug there with several consumers (`IMPLEMENTATION_PLAN.md`).
+- **Last completed:** F39, podium and a finale on the true result (2026-09-26), with a code-review round on F31–F32 and a clean-up of these docs.
+- **Next up:** nothing required. Optional: F33 (deployment: needs a host, a domain and permission) and F40–F42 (Kubernetes).
+- **Seed contest:** `0192f3a0-7c1e-7000-8000-00000000c0de` ("Tally Showcase"), codes `C1`–`C10`, closed and empty between checks. The README's media was recorded from it.
+- **Known gaps:**
+  - k6's 3,000/s spike misses p95 < 50 ms on the full stack (70–107 ms; `DECISIONS.md`, Open).
+  - With millions of votes, consumer restarts were slow for minutes (F31). The cause wasn't found, since the startup rebuild reads the aggregate tables, not the vote log. Measure before restarting the consumer under load.

@@ -1,129 +1,52 @@
 # Decisions
 
-Short entries: what was decided, the alternatives, and why. Newest at the bottom.
+What was decided, the alternatives, and why: the case study and the interview prep. Newest at the bottom. `SPEC.md` describes the system as it is now; this file is how it got there.
 
----
+## Open
 
-## Changes to the spec and plan
+- **k6 burst p95 (F23):** met at F19 (14–20 ms at 3,000/s). With ClickHouse, analytics and metrics added on the same laptop, k6's spike run measures 70–107 ms (zero loss, no drift), while the Go generator's 3,000/s burst stays near 9 ms. To re-measure with k6 on a separate machine; ingest replicas (branch `two-device`) are the other lever.
 
-Where the build departs from `SPEC.md` or `IMPLEMENTATION_PLAN.md`, or pins down something they left open in a way that changes a documented contract. Each row's reasoning is in that feature's entries below. `SPEC.md` and `IMPLEMENTATION_PLAN.md` carry a short inline note at each affected spot.
+## Index
 
-### Changed: the build does something other than the document says
+Entries are in build order under `## F<n> — …` headings; find a feature's with `grep -n "^## F16" DECISIONS.md`. The plan says what each feature is.
 
-| Area | Spec / plan said | Now | Feature |
-|---|---|---|---|
-| Feature list (plan) | F26 deployment, F27 README, optional F28–F30 Kubernetes | new F26 create contests, F27 sample contestants, F28 recap in the browser (plus `pnpm contests`); deployment is now F29, README F30, Kubernetes F31–F33. Earlier entries that mention deployment were updated to F29 | after F25 |
-| Contest lifecycle (SPEC §7, F16) | draft → open, open → closed, closed → open; no create or delete in the admin | plus `POST /api/contests` (a draft) and `DELETE /api/contests/:id` (drafts only); opening needs an active contestant; contest names unique ignoring case (migration `0005`) | F26 |
-| Recap in the browser (plan F28) | an admin-only API returns the recap data for the page | no API: `/admin/recap/[contestId]` is a server component that calls the same exporter and hands the data to the player; Refresh re-runs it. Layout gains `packages/recap-video` | F28 |
-| Feature list (plan), again | F29 deployment, F30 README, optional F31–F33 Kubernetes | new F29 counting backlog; deployment is now F30, README F31, Kubernetes F32–F34. Earlier entries that mention deployment were updated to F30 | after F28 |
-| Gateway protocol (SPEC §7) | snapshot and update carry totals, status, minutes | both also carry `backlog` (`{ pending, perSec, etaSec }` or null), system-wide; a backlog change alone sends an update | F29 |
-| Redis keys (SPEC §5) | totals, meta, minutes | plus `tally:backlog` (per-partition lag, per-consumer rate, `updatedAt`; per-field 10 s expiry via `HEXPIRE`) | F29 |
-| Counting backlog on the panel (plan F29) | the generator status handler adds `backlog` | a separate `GET /api/generator/backlog`, polled with `/status`: `GeneratorStatus` is a contract the Go generator mirrors, so it stays the generator's own | F29 |
-| Feature list (plan), third time | F30 deployment, F31 README, optional F32–F34 Kubernetes | new F30 UI polish; deployment is now F31, README F32, Kubernetes F33–F35. Earlier entries that mention deployment were updated to F31 | after F29 |
-| Feature list (plan), fourth time | F31 deployment, F32 README, optional F33–F35 Kubernetes | new F31 lively UI; deployment is now F32, README F33, Kubernetes F34–F36. Earlier entries that mention deployment were updated to F32 | after F30 |
-| Feature list (plan), fifth time | F32 deployment, F33 README, optional F34–F36 Kubernetes | new F32 stage look; deployment is now F33, README F34, Kubernetes F35–F37. Earlier entries that mention deployment were updated to F33 | after F31 |
-| Leader highlight (plan F31) | slides between rows as one shared element | handed over by fading: in on the new leader as it glides up, out on the old one as it drops. A shared element's hold on first place ended early when its row was also animating (a 15 px jump) | F31 |
-| Bars (plan F31) | "each bar's width springs to its new share" | none: built as votes relative to the leader, then removed after F31 at the user's request (on the cards they read as progress bars) | F31 |
-| "+N" bursts (plan F31) | at most once every ~600 ms per row | every 800 ms: at 600 ms a busy row's "+N"s overlapped | F31 |
-| Pinned header (plan F31) | the results header is pinned | pinned only on screens at least 641 px wide and 700 px tall; on phones it would take a third of the screen | F31 |
-| Rate display (plan F31) | "the shown rate follows the slider on a spring" | the panel's figures (target, delivered, counters, latencies) spring toward each reading; the number beside the slider stays exact, since it is what gets sent | F31 |
-| New contest (plan F31) | "a new contest slides in at the top" | creating a contest opens its contestants page (F26), so rows slide in wherever they arrive while a list is open (added contestants, a refreshed list); notices open to their height so nothing below jumps | F31 |
-| Layout (CLAUDE.md) | `app/admin`, `app/control`, each with a layout for local times | both inside `app/(operator)` (a route group: URLs unchanged), whose one layout renders the times provider and the nav | F31 |
-| Recap video (plan F31) | "only its spring constants aligned" | the winner card's pop is critically damped (it bounced) | F31 |
-| Lower third (plan F32) | the footer becomes a strip pinned to the bottom | none: built, then removed at the user's request (it covered rows and cards); the footer is a line again | F32 |
-| Header (plan F32) | the contest name as a lit sign, text straight on the stage | a glass title plate was added for contrast, then removed at the user's request; the header is as in F31 | F32 |
-| Status label (plan F32) | FINAL becomes "Final results" | still "Final", on a gold plate; the footer already says these are the final results | F32 |
-| Feature list (plan), after F34 | F33 deployment, optional F35–F37 Kubernetes | F33 made optional at the user's request; F35–F38 built on the branch `two-device` and not merged; new F39 podium and finale; Kubernetes F40–F42 | after F34 |
-| Build order (plan) | F33 deployment, then F34 README | F34 first, at the user's request; F33 adds the demo URL to the README | F34 |
-| Frame rate (plan F32) | the F31 60 fps check at 20,000 votes/s still passes | dropped: the generator is a mock, and performance targets apply to the data pipeline, not the frontend at its maximum rate | F32 |
-| Voter hash (SPEC §5) | `SHA-256` of sender + salt | `HMAC-SHA256`, salt as the key, sender trimmed first | F3 |
-| Idempotency key (SPEC §6, plan F3) | ingest generates one (a UUID) | client `Idempotency-Key` header is honoured; ingest generates a UUID only when absent. Keys are 1–128 visible ASCII, not necessarily UUIDs | F3 |
-| `votes` constraints (SPEC §5) | FK only on `contestants.contest_id` | FKs also on `votes.contest_id`, `votes.contestant_id`, `vote_totals`, `vote_buckets` (no cascades). Contestants with votes can't be deleted, only deactivated | F2 |
-| Ingest `/health` (SPEC §7) | `{ status, redpanda: "connected" }` | `{ status: "ok" \| "degraded", service, redpanda: "connected" \| "disconnected" }`, and **503** while the broker is unreachable | F4 |
-| `votes.dead` topic (plan F6) | built in F6 | created in F4 by the `topics` init job, alongside `votes.raw` | F4 |
-| F1 done-when (plan F1, CLAUDE.md) | `docker compose up` brings everything up | `docker compose up` = infra only; `docker compose --profile app up` = full stack. CLAUDE.md's definition of done updated | F1 |
-| Commits (plan working rules, CLAUDE.md) | commit at each feature boundary, feature number in the message | the user commits, using the project skill `/feature-commit`: `F<n>: subject` plus a what/why body. One exception in history: F3 went in as `a977aca feat(ingest): …`, written with the device-level conventional `commit-msg` skill | F3 |
-| Layout (CLAUDE.md) | no package for the database | new `packages/db` (Drizzle schema, client, migrate, seed). Migrations in `infra/migrations`. CLAUDE.md layout updated | F2 |
-| Frontend stack (CLAUDE.md, SPEC §9) | Motion **and** react-countup | Motion only: counters retarget a `useSpring`; react-countup dropped because its updates restart the animation (the stutter CLAUDE.md warns about) | F9 |
-| Gateway protocol (SPEC §7) | snapshot on connect, then updates | plus `{ type: "heartbeat", ts }` every 15 s; clients treat 35 s of silence as a dead connection | F11 |
-| Generator `/start` (SPEC §7) | `{ ratePerSec, contestId, invalidCodeRatio }` | plus required `codes` (the generator never reads the database) and `duplicateSenderRatio`; `/start` while running and `/burst` while stopped → 409; every control call returns the full status | F12 |
-| Generator `/status` (SPEC §7) | `{ running, currentRate, sentTotal }` | adds `contestId`, `baseRate`, `burstEndsAt`, `startedAt`, `accepted`, `rejected`, `failed`, `invalidSent`, `duplicateSent`, `latencyMs {p50,p95,p99}` | F12 |
-| Generator control API (SPEC §7) | `/start`, `/burst`, `/stop`, `/status` | plus `POST /rate { ratePerSec }`: changes a running generator's base rate without resetting counters (409 when stopped); a burst keeps priority until it ends | F13 |
-| Shared-password gate (plan F14) | built in F14 with the admin CRUD | built in F13 for the control panel; F14 reuses it | F13 |
-| Dead-letter reasons (SPEC §6) | `unknown_code`, `contest_closed`, `malformed` | plus `inactive_contestant`: a vote for a deactivated contestant. Postgres enum gained the value (migration `0002`) | F14 |
-| Consumer code cache (F5 decision) | resolved codes cached for the process lifetime; misses for 5 s | every lookup, hit or miss, is re-checked after 5 s, so (de)activation reaches running consumers | F14 |
-| `dead_letters` columns (SPEC §5) | id, raw payload, reason, received_at | plus `contest_id` (nullable uuid, no FK), written by the consumer and backfilled from payloads; indexed with reason and id | F15 |
-| Gateway protocol (SPEC §7) | snapshot and update carry totals | both also carry `status` (contest status from the Redis meta hash, or null); a status change alone sends an update with `changed: []` | F16 |
-| Redis meta hash (SPEC §5 keys) | written by the consumer | also `status`, written by web on each open/close (web now has `REDIS_URL`) | F16 |
-| Minute buckets (plan F17) | consumer increments the **current** minute | the minute **ingest accepted** the vote (`received_at`), from newly inserted votes only; existing votes backfilled by migration `0004` | F17 |
-| Redis keys (SPEC §5) | totals, meta | plus `tally:{contestId}:minutes` (minute → contest votes) and meta `lastMinute`; the consumer rebuilds all of Redis's totals and minutes from Postgres at startup | F17 |
-| Gateway protocol (SPEC §7) | snapshot / update | both also carry `minutes` (snapshot: the 30-minute window; update: changed minutes only) and `minutesTo` (the window's last minute) | F17 |
-| Redis sync (SPEC §5 keys, plan F5) | "increment the Redis counter"; `tally:idem:{key}` string, 1 h TTL, as a redelivery guard | Redis is **set** to absolute totals read back from Postgres (upward only, via Lua). No `tally:idem:*` keys: Postgres's unique `idempotency_key` is the only dedupe | F5 |
-| Unresolvable votes (plan F6, SPEC §5 `contestant_id` null = unresolved) | dead-lettering is F6; unresolved votes could sit in `votes` with a null contestant | F5 writes them to `dead_letters` (`unknown_code` / `malformed`); `votes.contestant_id` is never null in practice. F6 adds publishing to `votes.dead` | F5 |
-| `dead_letters` columns (SPEC §5) | id, raw payload, reason, received_at | plus a unique, nullable `idempotency_key` (the vote's key, or `offset:topic/partition/offset`) so replays don't duplicate dead letters | F5 |
-| `votes.dead` message shape (SPEC §6) | "the original payload plus `reason` and `failed_at`" | envelope `{ v: 1, reason, failed_at, idempotency_key, original }`; `original` is the parsed JSON, or `{ raw }` for non-JSON | F6 |
-
-### Filled in: the document was silent, and the choice is now part of a contract
-
-| Area | Decision | Feature |
-|---|---|---|
-| Adding several contestants (F27) | `POST /api/contestants/batch`: one insert, all or none; issues point at rows as `contestants.<i>.<field>`; 400 for a code repeated in the batch, 409 for one the contest has | F27 |
-| Operator times (F30) | the viewer's zone from a `tz` cookie (UTC if missing or unknown); "x min ago" within a day, else `24 Sept 2026, 17:34` (en-GB); full local time · UTC in the tooltip; dead letters show local clock time with ms | F30 |
-| Contest order (F30) | every list and picker: `created_at desc`; pickers grouped Open / Draft / Closed; `/admin/contests?status=open\|draft\|closed` filters | F30 |
-| Consumer port (SPEC §4 says —) | `4003`, serving `/health` only (later `/metrics`) | F1 |
-| Every service's `/health` | Shared `HealthResponse` in contracts. Web serves it at `/health`, not `/api/health` | F1 |
-| Enum value sets (SPEC §5 says `text`) | `contest_status`, `vote_source`, `dead_letter_reason` are Postgres enums built from Zod enums in contracts | F2 |
-| `dead_letters` columns | `id bigserial`, `payload jsonb`, `reason` enum, `received_at timestamptz` | F2 |
-| Seed | fixed contest ID `0192f3a0-7c1e-7000-8000-00000000c0de`; codes `C1`–`C10`; inserts are `DO NOTHING`, so re-seeding never overwrites edits, status or votes | F2 |
-| Code format (SPEC §6) | ingest trims and uppercases; must match `^[A-Z0-9]{1,16}$` or it gets a 400 | F3 |
-| `POST /votes` responses (SPEC §7) | 202 `{ eventId, idempotencyKey }`; 4xx `{ error, issues: [{ path, message }] }`; 413 over 4 KB; 415 non-JSON; 503 when publishing fails | F3 |
-| `sent_at` (SPEC §6) | set by ingest when it accepts the vote | F3 |
-| Partitions (plan F4 says "several") | 6 on both topics; Java-compatible murmur2 so placement matches rpk and other clients | F4 |
-| What a 202 means | the broker acknowledged the write (`acks=all`); a publish is capped at 5 s, then 503 | F4 |
-| Topic creation | one-shot `rpk` init job; services never create topics (`autocreateTopics: false`) | F4 |
-| `votes.received_at` | the event's `sent_at` (when ingest accepted the vote), not the processing time, so replays and minute buckets are deterministic | F5 |
-| Unknown contest | dead-lettered as `unknown_code` (the code can't resolve in that contest); no new reason value | F5 |
-| Consumer group | `tally-consumer`; new groups start at `earliest`; batches of 500 or 100 ms; offsets committed after both stores | F5 |
-| `votes.dead` delivery | at-least-once: every dead letter in a batch is (re)published after the commit, so a redelivery or replay duplicates it with the same `idempotency_key` and `failed_at`; readers dedupe on the key. Keyed by the original `code` when there is one | F6 |
-| Gateway frames (SPEC §7) | snapshot `{ type, contestId, totals: [{ contestantId, total }], totalVotes, ts }`; update `{ type, contestId, changed, totalVotes, ts }`, where `changed` holds only differing contestants, as absolute totals. Zod-defined in contracts (`LiveMessage`) | F7 |
-| Gateway polling | one Redis read per watched contest every 250 ms (`GATEWAY_POLL_MS`), fanned out to all its viewers; stops when the last viewer leaves | F7 |
-| Gateway close codes | `4400` invalid `contestId`, `1001` shutdown, `1011` first read failed; ping every 30 s | F7 |
-| Contestant metadata for the UI | loaded by the web app from Postgres and merged by ID; the gateway stays Redis-only | F7 |
-| Gateway `/debug` | bare, unauthenticated inspector page for the live protocol (public data only) | F7 |
-| Results routes | `/results/[contestId]`; `/` redirects to the most recently opened open contest (404 if none) | F8 |
-| Web runtime config | `GATEWAY_PUBLIC_URL` (the gateway as the browser sees it) read per request and passed from the server component; no `NEXT_PUBLIC_*`, so images aren't tied to one host | F8 |
-| Ranking | total desc, ties by code in natural order, competition ranks (1, 2, 2, 4) | F8 |
-| shadcn/ui timing (stack lists it) | deferred to F13/F14, where forms need it; the results list is custom | F8 |
-| Counter behaviour | first snapshot shows instantly (no count-up on load); later totals spring, overdamped so a count never overshoots or goes backwards; reduced motion jumps | F9 |
-| Reorder animation | Motion `layout="position"` on ID-keyed rows, no-bounce 0.45 s spring; the overtaking row draws above the rows it passes and its accent edge glows for 0.8 s; instant for reduced motion | F10 |
-| Reconnect policy | never gives up; jittered exponential backoff 0.5 s → 10 s cap; `4400` never retries, `1001` retries in < 1 s; backoff resets on snapshot, not on open; pauses while the browser is offline | F11 |
-| Connection states | `Connecting` / `Live` (after snapshot) / `Reconnecting` / `Offline` / `Unavailable`; stale totals stay visible, dimmed, with a "reconnecting in Ns" note | F11 |
-| Generator traffic | drifting-race popularity (random walk every 2 s); invalid codes are well-formed so they reach dead letters; synthetic `sim:` senders; one Idempotency-Key per vote | F12 |
-| Go ↔ TS contract test (SPEC §6) | JSON Schemas exported from Zod (drift-tested in TS); Go test checks structs, types, nullability, enums and validation bounds against them | F12 |
-| Admin session | `ADMIN_PASSWORD` (≥ 8 chars; unset = sign-in disabled). httpOnly, SameSite=Lax cookie `tally_admin` = `<expiresAt>.<HMAC>`, 12 h, key scrypt-derived from the password. `/login?next=` (same-site paths only) | F13 |
-| Generator control from the browser | only via web route handlers `/api/generator/{status,start,rate,burst,stop}`, which re-check the session, require JSON, validate with the `Generator*` schemas and call `GENERATOR_URL` server-side. `start` takes no codes: the handler reads them from Postgres | F13 |
-| Contestant API | `GET /api/contestants?contestId=` (inactive included, with vote counts), `POST` → 201 / 409 `conflict` on a taken code, `PATCH /api/contestants/:id` (strict: `code` and `contestId` → 400). Schemas `ContestantCreate` / `ContestantUpdate` / `Contestant` in contracts | F14 |
-| Contestant fields | code as `VoteCode` (trimmed, uppercased) and fixed after creation; name 1–80; `imageUrl` https only; accents `#RRGGBB` stored uppercase; country ISO alpha-2 checked against `Intl.DisplayNames` | F14 |
-| Deactivation | `active = false`: later votes dead-lettered as `inactive_contestant`, earlier votes and totals kept, hidden from results pages and from the generator's `/start` codes. Reversible | F14 |
-| Dead-letter API | `GET /api/dead-letters?contestId=&reason=&before=\|after=&limit=` → `{ items, older, newer }` (keyset cursors on id, newest first, limit 1–200, default 50); `GET /api/dead-letters/counts?contestId=&since=` → `{ total, byReason, latestId }`. Contracts `DeadLetterQuery` / `DeadLetterPage` / `DeadLetterCounts` | F15 |
-| Contest lifecycle | `POST /api/contests/:id/status { status: "open" \| "closed" }` → `{ contest, liveUpdated }`; allowed draft → open, open → closed, closed → open (reopen); anything else 409. Opening stamps `opens_at` and clears `closes_at`; closing stamps `closes_at` | F16 |
-| Which votes a contest counts | exactly those ingest accepted (`sent_at`) while it was open: `opens_at ≤ sent_at` and, once closed, `sent_at < closes_at`. Draft counts nothing. Null `opens_at` = open since creation. Everything else → `contest_closed` | F16 |
-| Reconciliation command | `pnpm reconcile [--repair] [--contest <uuid>] [--json]` on the host; `docker compose run --rm reconcile …` (profile `tools`, consumer image). Checks `vote_totals`, `vote_buckets`, Redis totals, `totalVotes`, minutes and `lastMinute` against a recount of `votes`. Exit 0 = no drift or all repaired, 1 = drift left, 2 = error | F18 |
-| Load test | `pnpm load <smoke\|steady\|spike>`: k6 (`grafana/k6:2.3.0`, `tools/load/votes.js`, open model) in the compose network against `ingest:4000`; steady = ramp to 1,000/s, hold 3 min; spike = 500/s → 3,000/s for 1 min → 500/s. Reports in `load-results/*.md` (raw JSON/CSV gitignored); results published in README | F19 |
-| Analytics pipeline | `services/analytics-consumer` (port 4004), consumer group `tally-analytics`, reads **both** `votes.raw` and `votes.dead` into ClickHouse `votes_raw` / `votes_dead`; ClickHouse 26.9 in the default compose profile (port 8123, user/db `tally`); schema created at startup. `HealthResponse` gained optional `clickhouse` | F20 |
-| ClickHouse schema | versioned migrations in `services/analytics-consumer/src/schema.ts` (`_migrations` table, applied at startup); `votes_raw` ORDER BY `(contest_id, sent_at, idempotency_key)`; both tables gain `key_hash UInt64 MATERIALIZED cityHash64(idempotency_key)`; `votes_dead.sent_at` = the original vote's; readers count votes as `uniqExact(key_hash)`, counted = accepted − rejected per minute | F21 |
-| Analytics page | `/admin/analytics?contest=` (operator, password-protected), data from `GET /api/analytics/:contestId`, ClickHouse only; refreshes every 15 s. Counted = distinct raw keys not in the contest's dead letters | F22 |
-| Metrics | `GET /metrics` (Prometheus text) on ingest, consumer, gateway, analytics-consumer, web and generator; shared `@tally/metrics` (prom-client, `service` label, `tally_` prefix); consumer lag from Redpanda's `public_metrics` (high watermark − committed offset); Prometheus (9090, 5 s scrapes) and Grafana (3001, anonymous viewer, dashboard `tally` provisioned from `infra/grafana`) in the `app` profile | F23 |
-| Card grid | results page `?view=grid` (default list), toggled on the page without a navigation; `ContestantRow` takes `layout: 'list' \| 'grid'`, sets `data-layout`, and keeps an identical element tree, with CSS grid areas arranging it; flag emoji from the country code | F24 |
-| Results recap | `tools/recap` (Remotion 4): `pnpm recap [contestId] [--out file.mp4]`, default the most recently closed contest; 1920×1080 at 30 fps, 32 s (intro 3 s, bar race 16 s, final standings 6 s, winner 7 s); data from Postgres; output in `recaps/` (gitignored); zod pinned to 4.5.4 in this package, Remotion's version | F25 |
-
-### Outstanding: a rule not met yet
-
-| Target | Status |
-|---|---|
-| SPEC §8 burst: p95 < 50 ms at 3,000/s (F19) | Met at F19 (p95 14–20 ms). With the F20–F23 additions on the same laptop, k6's spike run measures p95 **70–107 ms** at 3,000/s (zero loss, no drift). The Go generator's 3,000/s burst on the same stack stays at p95 about 9 ms. See F23 "Load regression"; to re-measure with k6 on a separate machine. |
-
-None other. *Resolved (F13):* `apps/web`'s exit code 143 on SIGTERM was taken for a missed drain. It isn't: Next's standalone server finishes in-flight requests, then exits with 128 + 15 on purpose. See the F13 entry.
+- **F1:** Compose runs infra by default, the full stack behind a profile · Redpanda advertises two listeners · `PORT` per service, defaulting to the spec port · Consumer health listener on 4003 · Host services load `.env` through Node's `--env-file-if-exists` · Contracts ship TypeScript source; services bundle them with tsup · Biome for lint and format · TypeScript 7 (native compiler) · Docker builds share one locked pnpm store
+- **F2:** Schema lives in `packages/db`, migrations in `infra/migrations` · Enum values defined once in contracts · Foreign keys on `votes`, `vote_totals`, `vote_buckets` · Seed inserts only what's missing (`ON CONFLICT DO NOTHING`) · Local stack runs migrate + seed as a one-shot job
+- **F3:** Idempotency key: honour `Idempotency-Key`, else generate · Sender hashing is HMAC-SHA256 keyed by the salt · Ingest canonicalises `code` (trim + uppercase, `^[A-Z0-9]{1,16}$`) · Error shape and what never gets echoed · Publisher is an interface; F3 ships a logging stub
+- **F4:** Kafka client: `@platformatic/kafka` · 202 means the broker has it: `acks=all`, idempotent producer, 5 ms micro-batches · Partitioning: key = `code`, Java-compatible murmur2, 6 partitions · Topics are created by an rpk init job, not by services · Bounded failure: 5 s publish deadline, broker-aware health
+- **F5:** Postgres is the only dedupe; Redis receives absolute totals · Unresolvable votes go to `dead_letters` now; the `votes.dead` topic waits for F6 · Consumer mechanics · Bundling gotcha: a workspace package's dependencies belong to the service
+- **F6:** `votes.dead` mirrors `dead_letters`, published at-least-once after the commit · Dead-letter message is an envelope
+- **F7:** Gateway protocol: absolute totals, diff-only updates, one poll per watched contest · Contestant metadata comes from the web app, not the gateway · Close codes, heartbeat, `/debug`
+- **F8:** Results page: server loads who, the browser streams how many · Gateway URL is runtime config passed from the server · Ranking rules · Look: broadcast scoreboard · Shared packages import with `.ts` extensions
+- **F9:** Counters retarget a Motion spring; react-countup is dropped · The spring must never overshoot · how it was verified · Found on the way: web dev couldn't start on the host
+- **F10:** Reorder is Motion layout animation on ID-keyed rows · Overtake treatment: the riser draws on top and glows · how it was verified
+- **F11:** Reconnect forever with jittered backoff; close codes decide urgency · App-level heartbeat and a 35 s stale watchdog · Disconnected UI: frozen, dimmed, explained · how it was verified
+- **F12:** Go generator: pacer, worker pool, standard library only · Control API and traffic model · Contract test through JSON Schema exported from Zod · Measured: 3,000 votes/s for 60 s
+- **F13:** Password gate brought forward; session is a signed expiry · The browser never talks to the generator · Ramp is `POST /rate`, not stop and start · Panel: polled status and a delivered-rate chart · how it was verified
+- **F14:** Codes are fixed; the resolver re-checks every 5 s · Deactivate, don't delete · Duplicate codes are Postgres's call · Admin UI · Found on the way: typecheck was red at the root · how it was verified
+- **F15:** Keyset pages, not numbered ones · The contest is a column, not a JSON lookup · "N new" banner instead of a moving list · Test support · how it was verified
+- **F16:** The cut-off is when ingest accepted the vote, enforced with a lock handshake · Draft counts nothing; reopen starts a new window · Results pages learn of a close through the gateway · Contests admin page · how it was verified
+- **F17:** Buckets are filed by acceptance minute, written like totals · Redis is rebuilt from Postgres at consumer startup · Chart window and transport · The gateway test flake, found and fixed · how it was verified
+- **F18:** Reconcile under the contest lock, repair by overwriting · how it was verified
+- **F19:** Load test: k6 in a container, one script that also proves zero loss · Found: docker-proxy distorted the spike numbers · how it was verified
+- **F20:** Analytics consumer: its own group, both topics, rows as delivered · Replay found three votes Postgres no longer has · how it was verified
+- **F21:** No rollups: the sorted table plus a key hash is fast enough, and exact · how it was verified
+- **F22:** Analytics page: ClickHouse for every number, Postgres for labels only · Found: the proxy never covered `/api/contests` · how it was verified
+- **F23:** Metrics: each service counts its own work; lag comes from Redpanda · Found: ClickHouse's own logging cost 1.6 cores at idle · Load regression since F19, measured, not solved · how it was verified
+- **F24:** One element tree, two arrangements · how it was verified
+- **F25:** Recap video: Remotion, fed by Postgres, deterministic bar race · how it was verified
+- **Tooling:** `pnpm reset:votes` wipes vote data, keeps contests
+- **Plans:** Three admin features before deployment (F26–F28) · Counting backlog (F29) · UI polish (F30) · Lively UI (F31) · Stage look (F32)
+- **F26:** Contests are created as drafts and deleted only as drafts · how it was verified
+- **F27:** Sample contestants: a review list, added all together · how it was verified
+- **F28:** Recap in the browser: one component, played by Remotion's player · how it was verified
+- **F29:** Counting backlog: the consumer reports its own lag · how it was verified
+- **F30:** UI polish: what building it turned up · how it was verified
+- **F31:** Lively UI: what building it turned up · how it was verified · the vote bars were dropped
+- **F32:** Stage look: what building it turned up · how it was verified
+- **F34:** README: a clip first, then the case
+- **Other:** Code review after F34
+- **F39:** Podium and a finale on the true result: what building it turned up · how it was verified
 
 ---
 

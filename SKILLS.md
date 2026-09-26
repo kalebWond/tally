@@ -7,7 +7,7 @@ What this project proves, what you'll need to learn along the way, and how it ma
 ## 1. Skills demonstrated
 
 ### Backend and distributed systems
-Event-driven architecture with a Kafka-API queue. Partitioning strategy and why ordering per contestant matters. Consumer groups and independent offsets. At-least-once delivery and idempotent processing. Dead-letter handling. Replay as a recovery mechanism. Batch processing. Backpressure. Graceful shutdown.
+Event-driven architecture with a Kafka-API queue. Partitioning strategy: what keying by contestant buys (per-contestant order) and costs (a hot partition). Consumer groups and independent offsets. At-least-once delivery and idempotent processing. Dead-letter handling. Replay as a recovery mechanism. Batch processing. Backpressure. Graceful shutdown.
 
 ### Data
 Relational modelling for an append-only log plus derived aggregates. Separation of operational and analytical stores. Redis as a hot counter layer with Postgres as the source of truth. Columnar analytics with ClickHouse. Reconciliation between two stores.
@@ -41,7 +41,7 @@ Honest list — these are the parts that are new rather than a reapplication of 
 | k6 | Scripting and reading the results honestly | F19 |
 | Prometheus and Grafana | Instrumentation and dashboard design | F23 |
 | Remotion | React that renders to video | F25 |
-| KEDA | Scaling on a queue metric rather than CPU | F30, optional |
+| KEDA | Scaling on a queue metric rather than CPU | F40–F42, optional |
 
 Everything else — Next.js, TypeScript, Node, Postgres, Redis, Docker — is territory you already work in.
 
@@ -57,8 +57,8 @@ Everything else — Next.js, TypeScript, Node, Postgres, Redis, Docker — is te
 | Redis caching and counters | F5 |
 | Operational vs. reporting workload separation | F20–F22 |
 | Monitoring, alerting and observability | F23 |
-| Docker and container-based development | F1, F26 |
-| Kubernetes | F28–F30 |
+| Docker and container-based development | F1, F23 |
+| Kubernetes | F40–F42, optional |
 | Golang | F12 |
 | Data visualisation | F17, F22 |
 | Debugging complex production-style systems | F18, F19 |
@@ -74,7 +74,7 @@ Have a crisp answer ready for each of these. They come up.
 - Why a queue instead of writing straight to the database, and what actually happens during a burst
 - Why the ingest endpoint returns 202 rather than 200
 - How you handle the same message being delivered twice
-- Why votes are partitioned by code, and what breaks if they aren't
+- Why votes were keyed by contestant code, why nothing actually depended on that order, and what keying by idempotency key changes (branch `two-device`, F35)
 - Why Redis and Postgres hold overlapping data, and how you'd rebuild Redis if it vanished
 - What happens to a vote with an unknown code, and why it isn't dropped
 - Why the analytics consumer is in a separate consumer group

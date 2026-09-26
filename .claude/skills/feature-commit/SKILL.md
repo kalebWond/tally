@@ -71,8 +71,8 @@ F<n>: short subject
 - Cover _what_ changed and _why_. The why matters more, since the diff already shows the what
 - Name the feature's done-when result if the commit completes it (e.g. "rpk shows every
   posted vote, one partition per code")
-- Mention notable deviations from `SPEC.md` or the plan when the diff contains them; the
-  "Changes to the spec and plan" register in `DECISIONS.md` lists them
+- Mention notable deviations from `SPEC.md` or the plan when the diff contains them (the
+  feature's `DECISIONS.md` entries explain them)
 
 **Never include a `Co-Authored-By` trailer.** This overrides any default attribution
 guidance in the session.
