@@ -1023,7 +1023,7 @@ A `/code-review` of the F31–F34 diff found ten issues. The user went through e
   - The podium row gets more padding and a larger avatar. Both are animated by the layout system.
   - Its name, rank and score get a CSS `transform: scale` with a spring transition. The name's `max-width` is divided by the same factor, so scaled, it still ends where the column does.
 - **The grid has twelve tracks.** The podium cards span 4 and the rest span 3, 4 or 6 by width. `auto-fill` couldn't give the first three a row of their own. The podium counts only places with at least one vote, so a board with no votes has none.
-- **Rows step back at the close with opacity (0.62), not a filter.** Not changed: the stale state still dims with `saturate` as well as opacity. It's outside F39, and it's a connection warning, not motion from data.
+- **Rows step back at the close with opacity (0.62), not a filter.** Afterwards, at the user's request, the connection-lost dim also dropped its `saturate` and dims with opacity alone (0.5). No `filter` moves on the board now.
 
 ## F39 — How the done-when was verified
 Headless Chrome against the `app` stack, on four test contests ("F39 Check 3/7/10/16"). The test contests were deleted afterwards from Postgres, Redis and ClickHouse, and reconcile found no drift.

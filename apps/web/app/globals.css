@@ -931,16 +931,14 @@ body {
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
+/* Connection lost (F11): the last totals stay, dimmed (opacity only: CLAUDE.md). */
 .board-rows,
 .board-count-value {
-  transition:
-    opacity 300ms ease,
-    filter 300ms ease;
+  transition: opacity 300ms ease;
 }
 .board[data-stale] .board-rows,
 .board[data-stale] .board-count-value {
   opacity: 0.5;
-  filter: saturate(0.3);
 }
 
 @media (max-width: 520px) {
