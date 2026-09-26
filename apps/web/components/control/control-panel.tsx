@@ -19,6 +19,9 @@ import { EXIT, EXPAND, GENTLE, SMOOTH, SNAPPY } from '@/lib/motion';
 import { RateChart } from './rate-chart';
 import { useGenerator } from './use-generator';
 
+/** How long the run toggle ignores clicks after changing between Start and Stop. */
+const TOGGLE_GUARD_MS = 600;
+
 type Contest = { id: string; name: string; status: string };
 
 const MAX_RATE = 20_000;
@@ -49,6 +52,16 @@ export function ControlPanel({
   }, [status]);
 
   const running = status?.running ?? false;
+  // Start and Stop are one button, and it changes role as soon as the request returns, tens of
+  // milliseconds later. A double-click's second click lands after that: ignore clicks for a moment
+  // after each change, so a habitual double-click can't start a run and stop it again.
+  const toggledAt = useRef(Number.NEGATIVE_INFINITY);
+  const wasRunning = useRef(running);
+  useEffect(() => {
+    if (wasRunning.current === running) return;
+    wasRunning.current = running;
+    toggledAt.current = performance.now();
+  }, [running]);
   const bursting = running && status?.burstEndsAt != null;
   const state =
     !reachable || !status ? 'Unreachable' : bursting ? 'Burst' : running ? 'Running' : 'Stopped';
@@ -202,16 +215,17 @@ export function ControlPanel({
                     variant={running ? 'destructive' : 'default'}
                     className="w-full overflow-hidden"
                     disabled={busy !== null || (!running && (!reachable || !contestId))}
-                    onClick={() =>
-                      running
-                        ? act('stop')
-                        : act('start', {
-                            contestId,
-                            ratePerSec: rate,
-                            invalidCodeRatio: invalidPct / 100,
-                            duplicateSenderRatio: duplicatePct / 100,
-                          })
-                    }
+                    onClick={() => {
+                      if (performance.now() - toggledAt.current < TOGGLE_GUARD_MS) return;
+                      if (running) act('stop');
+                      else
+                        act('start', {
+                          contestId,
+                          ratePerSec: rate,
+                          invalidCodeRatio: invalidPct / 100,
+                          duplicateSenderRatio: duplicatePct / 100,
+                        });
+                    }}
                   >
                     <AnimatePresence initial={false} mode="popLayout">
                       <motion.span

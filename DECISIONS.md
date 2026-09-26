@@ -33,7 +33,7 @@ Where the build departs from `SPEC.md` or `IMPLEMENTATION_PLAN.md`, or pins down
 | Lower third (plan F32) | the footer becomes a strip pinned to the bottom | none: built, then removed at the user's request (it covered rows and cards); the footer is a line again | F32 |
 | Header (plan F32) | the contest name as a lit sign, text straight on the stage | a glass title plate was added for contrast, then removed at the user's request; the header is as in F31 | F32 |
 | Status label (plan F32) | FINAL becomes "Final results" | still "Final", on a gold plate; the footer already says these are the final results | F32 |
-| Feature list (plan), after F34 | F33 deployment, optional F35–F37 Kubernetes | F33 made optional at the user's request; F35–F38 built on the branch `two-device` and not merged; Kubernetes F39–F41 | after F34 |
+| Feature list (plan), after F34 | F33 deployment, optional F35–F37 Kubernetes | F33 made optional at the user's request; F35–F38 built on the branch `two-device` and not merged; new F39 podium and finale; Kubernetes F40–F42 | after F34 |
 | Build order (plan) | F33 deployment, then F34 README | F34 first, at the user's request; F33 adds the demo URL to the README | F34 |
 | Frame rate (plan F32) | the F31 60 fps check at 20,000 votes/s still passes | dropped: the generator is a mock, and performance targets apply to the data pipeline, not the frontend at its maximum rate | F32 |
 | Voter hash (SPEC §5) | `SHA-256` of sender + salt | `HMAC-SHA256`, salt as the key, sender trimmed first | F3 |
@@ -989,3 +989,23 @@ Below that:
 - Diagrams as images: Mermaid stays editable and renders on GitHub.
 
 **Also:** the test data left from earlier checks was removed: the "F24 Grid Check" and "F26 Check" contests (6 contestants, no votes) and their Redis keys, and two recap renders from the F25 and F26 checks. The user's own contest was untouched.
+
+## Code review after F34
+A `/code-review` of the F31–F34 diff found ten issues. The user went through each one, and the decisions are recorded here.
+
+**Fixed as F31/F32 follow-ups:**
+- **Double-click on Start stopped the generator.** Start and Stop share one button, which turned into Stop as soon as the start request returned (tens of milliseconds), so a habitual double-click's second click stopped the run. After the button changes role, it now ignores clicks for about 600 ms.
+- **The Dialog wrapper can't be used uncontrolled.** It always passes `open`, so a `DialogTrigger` would never open it. Nothing used the trigger, so it was removed rather than supported.
+- **The leader's glow changed brightness mid-overtake.** At rest it painted beneath the row's panel, and while the row moved it painted above it. The row now isolates its own layers, so the glow is always drawn over the panel: the brighter of the two looks, at the user's choice.
+- **The hidden layout toggle still took taps.** On a touch screen, a tap could switch layout while the toggle was invisible. When hidden, it no longer takes pointer input, and the first tap only brings it back.
+- **The backlog line duplicated two helpers.** It now uses `backlogParts`/`backlogLine` and the `APPEAR` preset, with the wording unchanged.
+
+**Folded into F39** (see the plan):
+- the beams aiming at the winner's old position after a layout switch: the finale no longer aims
+- the confetti restarting when the colour changed: it plays once, when counting has finished
+- the rows animating `filter` at the close: replaced with opacity
+
+**Left as is, at the user's decision:**
+- **Duplicate test IDs for about 150 ms while a sample row is removed:** no effect on users, and nothing in the repo relies on those IDs.
+- **"Counting 237 queued vote":** the noun follows the real count while the number is still counting towards it, for about half a second. A minor glitch. The suggested rewording, with a colon, wasn't wanted.
+

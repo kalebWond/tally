@@ -140,7 +140,7 @@ A feature is done when its check in `IMPLEMENTATION_PLAN.md` passes, tests cover
 Update this section as you go.
 
 **Last completed:** F34, README and case study (2026-09-25), built before F33 at the user's request. F32, stage look, before it.
-**Next up:** a clean-up of the docs and this file, at the user's request. F33 (deployment) and F39–F41 (Kubernetes) are optional. F35–F38 (partition key, ingest and consumer replicas, generator on a second device) live on the branch `two-device`, not merged; a review found a bug there with several consumers (see `IMPLEMENTATION_PLAN.md`). Outstanding: the k6 spike regression (DECISIONS, F23); more than one ingest replica is the obvious next step there.
+**Next up:** the code-review fixes for F31–F32 (listed in DECISIONS, "Code review after F34"), then F39 (podium, and a finale on the true result), then a clean-up of the docs and this file. F33 (deployment) and F40–F42 (Kubernetes) are optional. F35–F38 (partition key, ingest and consumer replicas, generator on a second device) live on the branch `two-device`, not merged; a review found a bug there with several consumers (see `IMPLEMENTATION_PLAN.md`). Outstanding: the k6 spike regression (DECISIONS, F23); more than one ingest replica is the obvious next step there.
 
 **Seed contest:** `0192f3a0-7c1e-7000-8000-00000000c0de` ("Tally Showcase"), codes `C1`–`C10`, closed and without votes. Checks and demos that vote in it wipe its votes afterwards (Postgres, Redis and ClickHouse, filtered to the contest), so no test data is left behind. The README's media (`docs/media`) was recorded from it.
 

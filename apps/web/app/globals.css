@@ -489,6 +489,9 @@ body {
   border-radius: 6px;
   /* z-index needs a positioned box: the overtaking row draws above the rows it passes. */
   position: relative;
+  /* Its own layers, moving or not: otherwise the leader's glow (z-index -1) paints beneath the
+     panel at rest and over it while a transform runs, and its brightness jumps on every overtake. */
+  isolation: isolate;
   transition: filter 1s ease;
 }
 /* The lift (F31): while a row overtakes, a deep shadow and an accent edge fade in under it
@@ -663,6 +666,8 @@ body {
 }
 .board-layout[data-idle]:not(:focus-within) {
   opacity: 0;
+  /* Hidden means hidden: a tap on a touch screen wakes it rather than switching layout unseen. */
+  pointer-events: none;
 }
 .board-layout button {
   position: relative;

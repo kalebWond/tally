@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { type CSSProperties, useEffect, useMemo, useRef, useState } from 'react';
 import { backlogParts } from '@/lib/backlog-text';
 import { advance, cueOf, initialLighting, type Lighting, nextChangeAt } from '@/lib/lighting';
-import { EXIT, GENTLE, SNAPPY } from '@/lib/motion';
+import { APPEAR, SNAPPY } from '@/lib/motion';
 import { type Movement, movements } from '@/lib/movement';
 import { type Entrant, rank, titleSize, unknownIds } from '@/lib/standings';
 import { AnimatedNumber } from './animated-number';
@@ -346,12 +346,9 @@ export function LiveStandings({ contest, entrants, gatewayUrl, initialLayout }: 
                   className="board-backlog"
                   data-testid="backlog"
                   title="Votes accepted but not yet counted, across all live contests."
-                  initial={{ opacity: 0, y: -4 }}
-                  animate={{ opacity: 1, y: 0, transition: GENTLE }}
-                  exit={{ opacity: 0, y: -4, transition: EXIT }}
+                  {...APPEAR}
                 >
-                  Counting <AnimatedNumber value={counting.pending} /> queued {counting.noun}
-                  {counting.left && ` · ${counting.left}`}
+                  Counting <AnimatedNumber value={counting.pending} /> {counting.rest}
                 </motion.span>
               )}
             </AnimatePresence>
