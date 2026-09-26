@@ -435,9 +435,9 @@ Verified: the F32 functional check in headless Chrome, on the dev build before t
 
 ---
 
-## F33 — Deployment
+## Optional: F33 — Deployment
 
-*Renumbered:* was F26, then F29, then F30, then F31, then F32.
+*Renumbered:* was F26, then F29, then F30, then F31, then F32. *Made optional (after F34):* at the user's request.
 
 **Build:** Production Docker builds. Environment configuration for the chosen host. Deploy and verify.
 
@@ -463,9 +463,28 @@ The clip and stills (`docs/media`) were recorded from Tally Showcase with headle
 
 ---
 
-## Optional: F35–F37 — Kubernetes
+## F35–F38 — Scaling and a second device (branch `two-device`)
 
-*Renumbered:* was F28–F30, then F31–F33, then F32–F34, then F33–F35, then F34–F36.
+*Added (after F34):* built on the branch `two-device`, not merged into `main`:
+- **F35:** votes keyed by idempotency key, over 24 partitions (`TOPIC_PARTITIONS`)
+- **F36:** ingest replicas behind nginx
+- **F37:** consumer replicas
+- **F38:** the generator as a Windows program on a second machine
+
+**Measured:** on the 4-core laptop the whole pipeline tops out near 4,700 votes/s however the replicas are split, and moving the generator off it gave no gain.
+
+**Not merged, because a code review found:**
+- with several consumers, the board's contest-wide total and per-minute counts can stay too low
+- raising the partition count on a running stack can leave new partitions uncounted until the consumers restart
+- a few smaller issues
+
+The plan, decisions and load results are on that branch.
+
+---
+
+## Optional: F39–F41 — Kubernetes
+
+*Renumbered:* was F28–F30, then F31–F33, then F32–F34, then F33–F35, then F34–F36, then F35–F37, then F39–F41 (F35–F38 were built on the branch `two-device`).
 
 **Prerequisites already satisfied:** environment-variable config, no local disk state, health endpoints, graceful SIGTERM.
 
@@ -487,6 +506,8 @@ The clip and stills (`docs/media`) were recorded from Tally Showcase with headle
 | 28–32 | F26–F30 | Run a whole contest from the browser |
 | 33 | F31 | Lively UI |
 | 34 | F32 | Stage look |
-| 35–36 | F33–F34 | Deployed and written up |
+| 35 | F34 | Written up |
+| Branch `two-device` | F35–F38 | Scaling and a second device (not merged) |
+| Optional | F33, F39–F41 | Deployed; Kubernetes |
 
 Stopping after session 13 already leaves you with something worth showing.
