@@ -37,6 +37,12 @@ const RETUNE_MS = 1000;
 const FOLLOW = 0.35;
 /** A beam swinging onto a target, or settling still: a heavy lamp, so a little slower than UI. */
 const SWING_MS = 900;
+/**
+ * The finale's wander (F39): wide, slow sweeps, each beam on its own period, so they drift in
+ * and out of step instead of pointing anywhere.
+ */
+const WANDER_DEG = 20;
+const WANDER_S = [7.5, 10] as const;
 
 const angleOf = (el: Element) => {
   const m = new DOMMatrixReadOnly(getComputedStyle(el).transform);
@@ -50,13 +56,15 @@ const springEasing = () =>
  * One searchlight. The outer element points it (a CSS transition, so a new aim mid-swing turns
  * from wherever it is); the inner cone sways about that aim (a Web Animation, whose playback rate
  * sets the tempo and keeps its place). Both run on the compositor. Going still, the sway is
- * frozen where it is and eased to the middle; starting again, it eases out from the middle to
- * the end of a swing and carries on from there, so the beam never jumps.
+ * frozen where it is and eased to the middle; starting again, it eases out from where it is to
+ * the end of a swing and carries on from there, so the beam never jumps. The finale's wander is
+ * the same animation with a wider reach and a fixed, slower tempo.
  */
 function beam(outer: HTMLElement, cone: HTMLElement, mirrored: boolean) {
-  const reach = mirrored ? -SWAY_DEG : SWAY_DEG;
+  const side = mirrored ? -1 : 1;
+  const swing = (deg: number) => [rotate(-deg * side), rotate(deg * side)];
   // At playback rate 1, one swing (half a sway) takes a second.
-  const sway = cone.animate([rotate(-reach), rotate(reach)], {
+  const sway = cone.animate(swing(SWAY_DEG), {
     duration: 1000,
     iterations: Number.POSITIVE_INFINITY,
     direction: 'alternate',
@@ -65,38 +73,53 @@ function beam(outer: HTMLElement, cone: HTMLElement, mirrored: boolean) {
   // Held mid-swing, where the cone points straight along its aim, until the cue says sway.
   sway.pause();
   sway.currentTime = 500;
+  /** The live tempo, following the vote rate even while the beam wanders or holds still. */
   let rate = 1;
+  let mode: 'still' | 'sway' | 'wander' = 'still';
   let easing: Animation | null = null;
-  let swaying = false;
+
+  // Eases from wherever the cone points to the end of a swing, then lets the loop carry on.
+  const start = (reach: number, playRate: number) => {
+    (sway.effect as KeyframeEffect).setKeyframes(swing(reach));
+    sway.updatePlaybackRate(playRate);
+    const from = angleOf(cone);
+    easing?.cancel();
+    const ease = cone.animate([rotate(from), rotate(reach * side)], {
+      duration: 500 / playRate,
+      easing: 'ease-in-out',
+      fill: 'forwards',
+    });
+    easing = ease;
+    ease.onfinish = () => {
+      if (easing !== ease) return;
+      sway.currentTime = 1000;
+      sway.play();
+      ease.cancel();
+      easing = null;
+    };
+  };
 
   return {
     tempo(periodS: number, now = false) {
       const target = 2 / periodS;
       rate = now ? target : rate + (target - rate) * FOLLOW;
+      if (mode === 'wander') return;
       sway.updatePlaybackRate(rate);
       outer.dataset.period = (2 / rate).toFixed(1);
     },
     sway() {
-      if (swaying) return;
-      swaying = true;
-      const from = angleOf(cone);
-      easing?.cancel();
-      const start = cone.animate([rotate(from), rotate(reach)], {
-        duration: 500 / rate,
-        easing: 'ease-in-out',
-        fill: 'forwards',
-      });
-      easing = start;
-      start.onfinish = () => {
-        if (easing !== start) return;
-        sway.currentTime = 1000;
-        sway.play();
-        start.cancel();
-        easing = null;
-      };
+      if (mode === 'sway') return;
+      mode = 'sway';
+      start(SWAY_DEG, rate);
+    },
+    wander(periodS: number) {
+      if (mode === 'wander') return;
+      mode = 'wander';
+      outer.dataset.period = periodS.toFixed(1);
+      start(WANDER_DEG, 2 / periodS);
     },
     still(instant: boolean) {
-      swaying = false;
+      mode = 'still';
       const from = angleOf(cone);
       sway.pause();
       easing?.cancel();
@@ -143,9 +166,9 @@ function beamOrigin(outer: HTMLElement) {
 interface Props {
   colours: Colours;
   cue: Cue;
-  /** Codes of the panels the beams point at (left, right) in a spotlight or the finale. */
-  aimAt: readonly [string, string] | null;
-  /** True when the finale was already over when the page loaded: show it, don't play it. */
+  /** The code of the panel both beams cross on during a lead-change spotlight. */
+  aimAt: string | null;
+  /** True when the contest was closed and counted when the page loaded: show it, don't play it. */
   settled: boolean;
   samples: RefObject<TotalSample[]>;
 }
@@ -191,44 +214,41 @@ export const Stage = memo(function Stage({ colours, cue, aimAt, settled, samples
     };
   }, [samples]);
 
-  // The cue: sway, or hold still and point. `aimAt` keeps its identity while its codes do.
+  // The cue: sway, wander, or hold still and point.
   useEffect(() => {
     const [left, right] = beams.current;
     if (!left || !right) return;
     const instant = !posed.current || reduce;
-    // Posed once the beams have somewhere to be: a finale waiting for the first snapshot to name
-    // its winner is still to be posed, not played, when the winner arrives.
-    if (cue === 'live' || cue === 'dark' || aimAt) posed.current = true;
+    posed.current = true;
+    const lamps = [left, right];
 
     const point = () => {
-      if (!aimAt || cue === 'live' || cue === 'dark') {
-        left.aim(null, instant);
-        right.aim(null, instant);
-        return;
-      }
-      aimAt.forEach((code, i) => {
+      lamps.forEach((b, i) => {
         const outer = outers.current[i];
-        const target = panelCentre(code);
-        const b = beams.current[i];
-        if (outer && b) b.aim(target ? aimAngle(beamOrigin(outer), target) : null, instant);
+        const target = cue === 'spotlight' && aimAt ? panelCentre(aimAt) : null;
+        b.aim(outer && target ? aimAngle(beamOrigin(outer), target) : null, instant);
       });
     };
 
-    // Reduced motion: the beams hold a pose. They never sway, and a lead change doesn't move
-    // them; the finale's pose (on the winner) is simply shown.
+    // Reduced motion: the beams hold their resting pose. They never sway or wander, and a lead
+    // change doesn't move them.
     if (reduce) {
-      for (const b of [left, right]) b.still(true);
-      if (cue === 'finale') point();
-      else for (const b of [left, right]) b.aim(null, true);
+      for (const b of lamps) {
+        b.still(true);
+        b.aim(null, true);
+      }
       return;
     }
 
-    if (cue === 'live') for (const b of [left, right]) b.sway();
-    else for (const b of [left, right]) b.still(instant || cue === 'dark');
+    if (cue === 'live') for (const b of lamps) b.sway();
+    else if (cue === 'finale') {
+      left.wander(WANDER_S[0]);
+      right.wander(WANDER_S[1]);
+    } else for (const b of lamps) b.still(instant || cue === 'dark');
     point();
 
     // While pointing, follow the panel as the page scrolls or resizes.
-    if (cue !== 'spotlight' && cue !== 'finale') return;
+    if (cue !== 'spotlight') return;
     let frame = 0;
     const follow = () => {
       if (!frame)
@@ -246,7 +266,8 @@ export const Stage = memo(function Stage({ colours, cue, aimAt, settled, samples
     };
   }, [cue, aimAt, reduce]);
 
-  // Confetti once, when this page sees voting close; never on a page that loaded closed.
+  // Confetti once, when this page sees the last vote counted after the close (F39); never on a
+  // page that loaded with the contest already closed and counted.
   if (cue !== lastCue) {
     setLastCue(cue);
     if (cue === 'finale' && !settled && !reduce) setConfetti(true);

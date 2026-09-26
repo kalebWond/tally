@@ -15,9 +15,10 @@ export const SPOTLIGHT_MS = 2400;
 
 /**
  * - `dark`: the contest hasn't opened; beams off.
- * - `live`: voting; the beams sway at a tempo set by the vote rate.
+ * - `live`: voting, or closed with votes still being counted; the beams sway at a tempo set by
+ *   the vote rate.
  * - `spotlight`: the lead just changed; both beams cross on the new leader, then sway again.
- * - `finale`: voting closed; the beams rest on the winner, or one on each of two tied winners.
+ * - `finale`: closed and counted (F39): the beams wander, and confetti falls if this page saw it.
  */
 export type Cue = 'dark' | 'live' | 'spotlight' | 'finale';
 
@@ -32,10 +33,12 @@ export interface Lighting {
   shown: string | null;
   spotlight: { target: string; until: number } | null;
   lastCueAt: number;
-  /** Everyone in first place (a tie can have two winners). */
-  winners: readonly string[];
-  /** `live` when this page saw voting close (the finale plays), `settled` when it loaded closed. */
-  finale: 'none' | 'live' | 'settled';
+  /**
+   * After the close (F39): `counting` while votes accepted before it are still being counted;
+   * then `live` when this page sees the last one counted (the finale plays), or `settled` when
+   * it loaded with everything already counted (the finale is shown, not played).
+   */
+  finale: 'none' | 'counting' | 'live' | 'settled';
 }
 
 export const initialLighting: Lighting = {
@@ -45,24 +48,28 @@ export const initialLighting: Lighting = {
   shown: null,
   spotlight: null,
   lastCueAt: Number.NEGATIVE_INFINITY,
-  winners: [],
   finale: 'none',
 };
 
 /**
- * The next lighting state, given the contest's status and who is in first place (ids of the
- * contestants ranked first with at least one vote, in board order). Safe to call again with the
- * same input: a hold or a spotlight that ran out by `now` is applied then.
+ * The next lighting state, given the contest's status, who is in first place (ids of the
+ * contestants ranked first with at least one vote, in board order), and whether the counting
+ * queue is empty. Safe to call again with the same input: a hold or a spotlight that ran out by
+ * `now` is applied then.
+ *
+ * `counted` comes from the backlog, which covers every contest: it assumes one contest votes at
+ * a time, as the generator drives one. With two, one's finale would wait for the other's queue.
  */
 export function advance(
   prev: Lighting,
-  input: { status: ContestStatus; leaders: readonly string[] },
+  input: { status: ContestStatus; leaders: readonly string[]; counted: boolean },
   now: number,
 ): Lighting {
-  const { status, leaders } = input;
+  const { status, leaders, counted } = input;
   const leader = leaders[0] ?? null;
 
-  // The first reading sets the scene as it is: no hold, no spotlight, no finale to play.
+  // The first reading sets the scene as it is: no hold, no spotlight. A contest found closed and
+  // counted shows its finale; one still counting plays it when the counting ends.
   if (prev.status === null) {
     return {
       ...initialLighting,
@@ -70,17 +77,18 @@ export function advance(
       leader,
       since: now,
       shown: leader,
-      winners: leaders,
-      finale: status === 'closed' ? 'settled' : 'none',
+      finale: status !== 'closed' ? 'none' : counted ? 'settled' : 'counting',
     };
   }
 
-  const next: Lighting = { ...prev, status, leader, winners: leaders };
+  const next: Lighting = { ...prev, status, leader };
+  // Votes still being counted after the close can change the lead: it's still a race.
+  const racing = status === 'open' || (status === 'closed' && prev.finale === 'counting');
 
   if (leader !== prev.leader) {
     next.since = now;
     const active = prev.spotlight && now < prev.spotlight.until;
-    if (status === 'open' && prev.leader !== null && leader !== null) {
+    if (racing && prev.leader !== null && leader !== null) {
       if (active && prev.spotlight) {
         // Mid-swing: the beams turn toward the newest leader, on the same cue.
         next.spotlight = { ...prev.spotlight, target: leader };
@@ -91,13 +99,18 @@ export function advance(
     }
   }
 
-  if (status === 'closed' && prev.status !== 'closed') {
-    // Voting closed while the page watched: the finale plays, in the winner's colours.
-    next.finale = 'live';
-    next.shown = leader;
-    next.spotlight = null;
-  } else if (status !== 'closed') {
+  if (status !== 'closed') {
     next.finale = 'none';
+  } else if (prev.status !== 'closed' || prev.finale === 'counting') {
+    // Voting closed while the page watched. The finale plays, in the winner's colours, once
+    // the last vote accepted before the close is counted: only then is the winner known.
+    if (counted) {
+      next.finale = 'live';
+      next.shown = leader;
+      next.spotlight = null;
+    } else {
+      next.finale = 'counting';
+    }
   }
 
   if (next.leader !== next.shown && now - next.since >= STAGE_HOLD_MS) next.shown = next.leader;
@@ -106,8 +119,8 @@ export function advance(
 }
 
 export function cueOf(l: Lighting): Cue {
-  if (l.status === 'closed') return 'finale';
-  if (l.status !== 'open') return 'dark';
+  if (l.status === 'closed' && l.finale !== 'counting') return 'finale';
+  if (l.status !== 'open' && l.status !== 'closed') return 'dark';
   return l.spotlight ? 'spotlight' : 'live';
 }
 

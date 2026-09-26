@@ -510,6 +510,16 @@ The plan, decisions and load results are on that branch.
 - **Closing with votes still queued:** the confetti goes off once, when the backlog reaches zero, lasts about 9 s, and is in the final winner's colour even if a late count changes the lead. The beams start wandering at that moment.
 - **Reloading a closed contest** shows the pose without confetti.
 
+*Decided (F39):* as planned.
+- **The finale:** the lighting gained a `counting` state between the close and the finale. The beams wander ±20° at periods of 7.5 s and 10 s. The confetti lasts about 9.6 s: 260 pieces entering over 5 s. The winner's colour is taken when it starts.
+- **The podium:** the list's podium rows are 96 px tall against 72 px. Their name, rank and score grow by scale transforms (×1.16–1.2), and the grid has twelve tracks.
+- **Verified in headless Chrome:**
+  - **Layouts:** 3, 7, 10 and 16 contestants, list and grid, at 1920×1080 and 390×844. The podium was always three, names never overlapped scores, there was no sideways scroll, and ten rows fit at 1080p.
+  - **A 3rd/4th swap at 60 fps:** heights changed by at most 6 px per frame.
+  - **A close with votes queued:** the consumer was stopped. Queued votes put a new leader first, and the confetti went off once, for 9.6 s, in that leader's colour.
+  - **A reload** showed the pose without confetti.
+  - Details are in `DECISIONS.md`.
+
 ---
 
 ## Optional: F40–F42 — Kubernetes
