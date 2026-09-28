@@ -16,7 +16,7 @@ It's modelled on a production SMS voting system built for a live televised talen
   - Redis only ever receives absolute totals, so a redelivered message can't count twice.
   - A vote that can't be resolved goes to a dead-letter topic with a reason; none is dropped silently.
   - `pnpm reconcile` proves every derived count against the vote log.
-- **Measured, not claimed.** On a laptop running the whole stack: 1,000 votes/s sustained and 3,000 votes/s bursts at p95 7–20 ms, with every accepted vote counted exactly once ([numbers below](#performance)).
+- **Measured, not claimed.** On a laptop running the whole stack: 1,000 votes/s sustained and 3,000 votes/s bursts at p95 7–20 ms, about 5,000 votes/s at the peak, with every accepted vote counted exactly once ([numbers below](#performance)).
 - **A board built for the overtake.** Counters retarget a spring instead of restarting, so four updates a second read as one continuous climb. Rows glide past each other when one overtakes another, the top three stand on a podium, and the searchlights follow the lead. After the close, the finale waits until every queued vote is counted, so the confetti falls for the true winner.
 
 ## Architecture
@@ -112,7 +112,7 @@ The spec's targets were 1,000 votes/s sustained, 3,000+ in bursts, p95 under 50 
 **Caveats, measured rather than assumed:**
 - **Laptop variance:** two identical spike runs differ by 6 ms at p95. In the second, k6 briefly ran short of virtual users and skipped 32 of its 282,499 scheduled requests. Those were never sent, so they don't count as lost.
 - **The host port hop:** a run through Docker's host port forwarding had p95 70.7 ms. The published runs call ingest by service name inside the compose network, as a deployment would.
-- **The stack has grown since F19.** ClickHouse, the analytics consumer, Prometheus and Grafana now share the same 8 threads, and k6's spike run no longer meets the p95 target at 3,000/s: it measures 70–107 ms, still with zero loss and no drift. Over the same stack, the Go generator's 3,000/s burst keeps ingest's p95 at about 9 ms. The investigation ([`DECISIONS.md`](DECISIONS.md), F23) fixed ClickHouse's idle logging and an undersized Postgres buffer. What's left looks like CPU contention between the load generator and the system under test, which a separate k6 machine would confirm.
+- **The stack has grown since F19.** ClickHouse, the analytics consumer, Prometheus and Grafana now share the same 8 threads. With one ingest instance, k6's spike run missed the p95 target at 3,000/s (70–107 ms, still with zero loss and no drift; [`DECISIONS.md`](DECISIONS.md), F23). With two ingest replicas behind nginx it meets it again: spike p95 12.1 ms, steady 12.4 ms (F37).
 
 ## Decisions and trade-offs
 
@@ -157,7 +157,15 @@ pnpm check:health                 # checks every ingest and consumer replica
 - **Ingest replicas** sit behind nginx (`ingest-proxy`), which owns port 4000 and picks up new replicas within 5 s.
 - **Consumer replicas** split the queue's partitions (24 by default, `TOPIC_PARTITIONS`).
 - **Prometheus and Grafana** find every replica on their own.
-- **On a 4-core laptop** the whole pipeline tops out near 4,700 votes/s however the replicas are split. More consumers keep the board from falling behind (with 3, no backlog forms); more throughput needs more cores ([`load-results/`](load-results)).
+- **On a 4-core laptop** the whole pipeline tops out near 5,000 votes/s however the replicas are split, because every container shares the same cores; more throughput needs more cores ([`load-results/`](load-results)):
+
+  | Replicas | Accepted/s | Counted/s | Backlog at the peak |
+  |---|---|---|---|
+  | 2 ingest, 2 consumers | 5,274 | 4,306 | 67,356 (drained in 7 s) |
+  | 2 ingest, 3 consumers | 4,911 | 4,777 | 2,221 (drained in 3 s) |
+  | Ingest alone (consumers stopped), 1 / 2 / 3 replicas | 6,565 / 7,214 / 8,263 | – | – |
+
+  A third consumer keeps the board up to date rather than raising the ceiling.
 
 **Generator on a second machine:** run `pnpm generator:exe` and copy `tools/generator/bin/generator.exe` and `run-generator.cmd` to a Windows PC on the same network, where neither Docker nor Go is needed. Then set `COMPOSE_FILE=compose.yaml:compose.two-device.yaml` and `GENERATOR_HOST=<its address>` in `.env`, and run `docker compose --profile app up -d`. The generator panel drives the remote generator as before.
 
